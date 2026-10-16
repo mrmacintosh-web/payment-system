@@ -3,7 +3,7 @@ const app = $("#app"),
   modal = $("#modal");
 const state = {
   user: null,
-  config: { business_name: "ClearLedger" },
+  config: { business_name: "The Office of Yash SR: Payment Portal" },
   invoices: [],
   plans: [],
   customers: [],
@@ -118,8 +118,11 @@ function toast(message) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => $("#toast").classList.remove("visible"), 4500);
 }
+function portalBrand(large = false) {
+  return `<a class="brand ${large ? "brand-large" : ""}" href="/" aria-label="${escape(state.config.business_name)}"><img class="brand-logo" src="/brand/office-logo.png" alt="The Office of Yash Sunder Raj logo" width="240" height="100"><span class="brand-name">${escape(state.config.business_name)}</span></a>`;
+}
 function renderLogin(error = "") {
-  app.innerHTML = `<main class="login-layout"><section class="login-story"><a class="brand" href="/">${icon("logo")}<span>${escape(state.config.business_name)}</span></a><div class="story-content"><span class="eyebrow light">A LITTLE CLARITY GOES A LONG WAY</span><h1>Good business.<br>Clear balances.</h1><p>A simple place for your invoices, your payments,<br class="desktop-only"> and a plan that works for you.</p><div class="story-card"><div class="story-card-top"><span class="story-mark">${icon("invoice")}</span><span>Everything, accounted for.</span>${icon("check")}</div><div class="story-lines"><span>Your invoices</span><b>All in one place</b></div><div class="story-lines"><span>Every charge</span><b>Clear & itemized</b></div><div class="story-lines"><span>A little flexibility</span><b>Just a request away</b></div></div><div class="story-note"><span class="mini-avatars"><i>AJ</i><i>SR</i><i>MC</i></span><span>Less back-and-forth. More peace of mind.</span></div></div><p class="story-footer">A better relationship with your billing.</p><div class="story-orbit" aria-hidden="true"></div></section><section class="login-panel"><div class="login-form-wrap"><div class="login-icon">${icon("lock")}</div><span class="eyebrow">YOUR BILLING, SIMPLIFIED</span><h2>Welcome back.</h2><p class="muted login-subtitle">Sign in to see where everything stands.</p><form id="login-form"><label>Email address<input name="email" type="email" autocomplete="username" placeholder="you@example.com" required maxlength="254"></label><label>Password<input name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required maxlength="128"></label><p class="form-error" role="alert">${escape(error)}</p><button class="button primary full" type="submit">Sign in ${icon("arrow")}</button></form><p class="login-help">Need access or a password reset?<br>Contact the business that sent your invoice.</p>${state.config.demo ? `<div class="demo-box"><span class="eyebrow">TAKE A LOOK AROUND</span><p>This is a demo with sample data.</p><div class="demo-buttons"><button class="button secondary" data-action="demo-admin">${icon("grid")} Admin demo</button><button class="button secondary" data-action="demo-customer">${icon("settings")} Customer demo</button></div></div>` : ""}<div class="secure-note">${icon("lock")} Your account. Your information.</div></div><p class="login-bottom">Powered by ${escape(state.config.business_name)} <span>•</span> Billing made clear</p></section></main>`;
+  app.innerHTML = `<main class="login-layout"><section class="login-story"><div class="login-brand">${portalBrand(true)}</div><div class="story-content"><span class="eyebrow">A CLEARER VIEW OF YOUR ACCOUNT</span><h1>Your account.<br>All in one place.</h1><p>View your invoices, understand every charge,<br class="desktop-only"> and find a payment plan that works for you.</p><div class="story-features"><span>${icon("invoice")} Itemized invoices</span><span>${icon("plan")} Flexible payment requests</span></div></div><p class="story-footer">The Office of Yash SR · Your payment portal</p></section><section class="login-panel"><div class="login-form-wrap"><span class="eyebrow">PAYMENT PORTAL</span><h2>Welcome back.</h2><p class="muted login-subtitle">Sign in to view your account.</p><form id="login-form"><label>Email address<input name="email" type="email" autocomplete="username" placeholder="you@example.com" required maxlength="254"></label><label>Password<input name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required maxlength="128"></label><p class="form-error" role="alert">${escape(error)}</p><button class="button primary full" type="submit">Sign in ${icon("arrow")}</button></form><p class="login-help">Need access or a password reset?<br>Contact The Office of Yash SR.</p>${state.config.demo ? `<div class="demo-box"><span class="eyebrow">EXPLORE THE PORTAL</span><p>Try an account with sample information.</p><div class="demo-buttons"><button class="button secondary" data-action="demo-admin">${icon("grid")} Admin demo</button><button class="button secondary" data-action="demo-customer">${icon("settings")} Customer demo</button></div></div>` : ""}<div class="secure-note">${icon("lock")} Private access. Clear information.</div></div><p class="login-bottom">${escape(state.config.business_name)}</p></section></main>`;
 }
 async function loadData() {
   const [invoices, plans, customers] = await Promise.all([
@@ -156,14 +159,7 @@ function render() {
     return;
   }
   const pending = state.plans.filter((p) => p.status === "pending").length;
-  app.innerHTML = `<div class="app-layout"><aside class="sidebar"><a class="brand" href="/">${icon("logo")}<span>${escape(state.config.business_name)}</span></a><div class="workspace-label"><span class="workspace-symbol">${isAdmin() ? "B" : "P"}</span><div><strong>${isAdmin() ? "Business workspace" : "Your billing portal"}</strong><small>${isAdmin() ? "Administrator" : "Personal account"}</small></div></div><div class="nav-label">WORKSPACE</div><nav aria-label="Main navigation">${navItems()
-    .map(
-      ([view, i, label]) =>
-        `<button class="nav-item ${state.view === view ? "active" : ""}" data-view="${view}" ${state.view === view ? 'aria-current="page"' : ""}>${icon(i)}<span>${label}</span>${view === "plans" && pending ? `<span class="nav-count" aria-hidden="true">${pending}</span>` : ""}</button>`,
-    )
-    .join(
-      "",
-    )}</nav><div class="sidebar-bottom"><div class="sidebar-tip">${icon("spark")}<strong>A clearer way to bill.</strong><p>Every invoice. Every detail.<br>One less thing to worry about.</p></div><button class="nav-item ${state.view === "account" ? "active" : ""}" data-view="account">${icon("settings")}<span>Account settings</span></button><button class="nav-item" data-action="logout">${icon("logout")}<span>Sign out</span></button><div class="sidebar-profile"><span class="avatar">${escape(initial(state.user.full_name))}</span><div><strong>${escape(state.user.full_name)}</strong><small>${isAdmin() ? "Administrator" : "Customer account"}</small></div><span class="online-dot" title="Signed in"></span></div></div></aside><div class="main-shell"><header class="topbar"><div class="breadcrumb">Workspace ${icon("chevron")} <span>${{ overview: "Overview", invoices: "Invoices", customers: "Customers", plans: isAdmin() ? "Plan requests" : "Payment plans", account: "Account settings" }[state.view]}</span></div><div class="topbar-right">${state.config.demo ? '<span class="demo-pill">DEMO WORKSPACE</span>' : ""}<span class="date-display">${day(today())}</span><button class="avatar small profile-button" data-view="account" aria-label="Account settings">${escape(initial(state.user.full_name))}</button></div></header><main id="main-content" tabindex="-1">${renderPage()}</main><footer class="app-footer"><span>© ${new Date().getFullYear()} ${escape(state.config.business_name)}</span><span>${icon("lock")} A little clarity for your day.</span></footer></div></div>`;
+  app.innerHTML = `<div class="app-layout ${isAdmin() ? "admin-workspace" : "customer-workspace"}"><header class="site-header"><div class="header-inner">${portalBrand()}<nav class="top-navigation" aria-label="Main navigation">${[...navItems(), ["account", "settings", "Account"]].map(([view, i, label]) => `<button class="nav-item ${state.view === view ? "active" : ""}" data-view="${view}" ${state.view === view ? 'aria-current="page"' : ""}>${icon(i)}<span>${label}</span>${view === "plans" && pending ? `<span class="nav-count" aria-hidden="true">${pending}</span>` : ""}</button>`).join("")}</nav><div class="header-actions">${state.config.demo ? '<span class="demo-pill">Demo</span>' : ""}<button class="avatar profile-button" data-view="account" aria-label="Account settings">${escape(initial(state.user.full_name))}</button><button class="icon-button signout-button" data-action="logout" aria-label="Sign out">${icon("logout")}</button></div></div></header><div class="main-shell"><main id="main-content" tabindex="-1">${renderPage()}</main><footer class="app-footer"><span>${escape(state.config.business_name)}</span><span>${icon("lock")} Your account, privately and securely.</span></footer></div></div>`;
 }
 function heading(eyebrow, title, description, action = "") {
   return `<div class="page-heading"><div><span class="eyebrow">${eyebrow}</span><h1>${title}</h1><p>${description}</p></div>${action}</div>`;
@@ -178,81 +174,55 @@ function renderPage() {
   if (state.view === "plans") return plansPage();
   return `${heading("MAKE YOURSELF AT HOME", "Account settings", "Your details and sign-in security.")}<section class="panel account-panel"><div class="profile-large"><span class="avatar">${escape(initial(state.user.full_name))}</span><div><h2>${escape(state.user.full_name)}</h2><p class="muted">${escape(state.user.email)}</p></div></div><dl class="account-details"><div><dt>Account type</dt><dd>${isAdmin() ? "Administrator" : "Customer"}</dd></div><div><dt>Email address</dt><dd>${escape(state.user.email)}</dd></div></dl><div class="account-security"><div><h3>Password & security</h3><p class="muted">Choose a unique password with at least 12 characters.</p></div><button class="button secondary" data-action="change-password">Change password</button></div><div class="account-signout"><button class="text-button" data-action="logout">${icon("logout")} Sign out of your account</button></div></section>`;
 }
+function customerOverview() {
+  const outstanding = state.invoices.reduce(
+    (sum, invoice) => sum + invoice.balance,
+    0,
+  );
+  const unpaid = state.invoices.filter((invoice) => invoice.balance > 0).length;
+  return `<section class="customer-overview"><p class="balance-greeting">Welcome back, ${escape(state.user.full_name.split(" ")[0])}.</p><div class="balance-hero" aria-labelledby="total-due-title"><span class="balance-rule" aria-hidden="true"></span><h1 id="total-due-title">Total due</h1><p class="balance-value ${money(outstanding).length > 10 ? "long-amount" : ""}" aria-label="Total due ${money(outstanding)}">${money(outstanding)}</p><p class="balance-note">${unpaid ? `Across ${unpaid} outstanding invoice${unpaid === 1 ? "" : "s"}. All amounts in USD.` : "You’re all paid up. Thank you."}</p><div class="balance-actions"><button class="button primary" data-view="invoices">View invoices ${icon("arrow")}</button>${unpaid ? `<button class="text-button" data-view="invoices">Request a payment plan ${icon("arrow")}</button>` : ""}</div></div><p class="balance-bottom-note">Every charge, every payment, clearly accounted for.</p></section>`;
+}
 function overview() {
-  const outstanding = state.invoices.reduce((s, i) => s + i.balance, 0),
-    overdue = state.invoices.filter((i) => i.status === "overdue"),
-    collected = state.invoices.reduce((s, i) => s + i.paid, 0);
-  const activePlans = state.plans.filter(
-      (p) =>
-        p.status === "approved" &&
-        state.invoices.some((i) => i.id === p.invoice_id && i.balance > 0),
-    ).length,
-    pending = state.plans.filter((p) => p.status === "pending");
-  const next = state.invoices
-    .filter((i) => i.balance > 0)
-    .sort((a, b) => a.due_date.localeCompare(b.due_date))[0];
-  const stats = isAdmin()
-    ? [
-        [
-          "Outstanding balance",
-          money(outstanding),
-          "Across all unpaid invoices",
-          "wallet",
-          "mint",
-        ],
-        [
-          "Overdue",
-          money(overdue.reduce((s, i) => s + i.balance, 0)),
-          `${overdue.length} invoice${overdue.length === 1 ? "" : "s"} need attention`,
-          "clock",
-          "peach",
-        ],
-        [
-          "Payments received",
-          money(collected),
-          "Recorded payments, all time",
-          "trend",
-          "lavender",
-        ],
-        [
-          "Total customers",
-          state.customers.length,
-          "A little clarity for everyone",
-          "users",
-          "blue",
-        ],
-      ]
-    : [
-        [
-          "Total outstanding",
-          money(outstanding),
-          "Your remaining balance",
-          "wallet",
-          "mint",
-        ],
-        [
-          "Overdue balance",
-          money(overdue.reduce((s, i) => s + i.balance, 0)),
-          `${overdue.length} overdue invoice${overdue.length === 1 ? "" : "s"}`,
-          "clock",
-          "peach",
-        ],
-        [
-          "Payments made",
-          money(collected),
-          "Thank you for keeping up",
-          "check",
-          "lavender",
-        ],
-        [
-          "Active plans",
-          activePlans,
-          `${pending.length} request${pending.length === 1 ? "" : "s"} awaiting review`,
-          "plan",
-          "blue",
-        ],
-      ];
-  return `${heading(isAdmin() ? "THE BIG PICTURE" : "YOUR ACCOUNT AT A GLANCE", `Welcome back, ${escape(state.user.full_name.split(" ")[0])}<span class="greeting-dot">.</span>`, isAdmin() ? "Here’s where your business stands. Let’s keep things clear." : "Your invoices and payments, without the guesswork.", isAdmin() ? createButton() : "")}<div class="stats-grid">${stats.map(([label, value, note, i, color]) => `<section class="stat-card"><div class="stat-top"><span>${label}</span><span class="stat-icon ${color}">${icon(i)}</span></div><strong>${value}</strong><span class="stat-note">${note}</span></section>`).join("")}</div><div class="overview-grid"><div class="overview-primary"><section class="balance-banner"><div><span class="eyebrow light">${isAdmin() ? "ROOM TO KEEP GROWING" : "ONE THING AT A TIME"}</span><h2>${isAdmin() ? "Good billing starts with clarity." : outstanding ? "A clear path to paid." : "You’re all caught up."}</h2><p>${isAdmin() ? "Create an invoice, add the details, and give your customers a clear view." : outstanding ? "See every charge. Track every payment. Need some flexibility? Let’s find a plan." : "No outstanding balance. You can still view your past invoices below."}</p><button class="button lime" data-${isAdmin() ? 'action="new-invoice"' : 'view="invoices"'}>${isAdmin() ? "Create an invoice" : "Explore your invoices"} ${icon("arrow")}</button></div><div class="banner-art" aria-hidden="true"><div class="art-sheet"><span class="art-sheet-icon">${icon("invoice")}</span><i></i><i></i><i></i><div class="art-check">${icon("check")}</div></div><span class="art-spark one">✦</span><span class="art-spark two">✦</span></div></section><section class="panel recent-panel"><div class="panel-heading"><div><h2>Recent invoices <span class="count-label">${state.invoices.length}</span></h2><p>Every detail, right where you need it.</p></div><button class="text-button" data-view="invoices">View all ${icon("arrow")}</button></div>${invoiceTable(state.invoices.slice(0, 5), true)}</section></div><aside class="overview-aside"><section class="panel side-panel"><div class="panel-heading compact"><h2>${isAdmin() ? "Plan requests" : "Your next due date"}</h2><span class="stat-icon ${isAdmin() ? "lavender" : "mint"}">${icon(isAdmin() ? "plan" : "clock")}</span></div>${isAdmin() ? `<div class="request-number">${pending.length}<span>awaiting your review</span></div><p class="muted side-copy">A little flexibility can make a big difference. Review your customers’ requests here.</p><button class="button secondary full" data-view="plans">Review requests ${icon("arrow")}</button>` : next ? `<p class="next-date">${day(next.due_date)}</p><p class="muted">${escape(next.number)}</p><div class="next-amount">${money(next.balance)} <span>remaining</span></div><button class="button secondary full" data-action="invoice" data-id="${next.id}">View invoice ${icon("arrow")}</button>` : `<div class="empty-check">${icon("check")}</div><h3>Nothing due. Nice.</h3><p class="muted side-copy">We’ll keep your invoices organized here.</p>`}</section><section class="help-card"><div class="help-icon">${icon(isAdmin() ? "invoice" : "plan")}</div><h3>${isAdmin() ? "Small details. Big difference." : "Need a little breathing room?"}</h3><p>${isAdmin() ? "Add individual charges and a clear due date so customers know exactly where they stand." : "Request a payment plan from any unpaid invoice. Propose an amount that works for you."}</p><button class="text-button" data-${isAdmin() ? 'action="new-invoice"' : 'view="invoices"'}>${isAdmin() ? "Create an invoice" : "Find an invoice"} ${icon("arrow")}</button></section><div class="quiet-note">${icon("lock")} Only you and your billing administrator<br>can access your account details.</div></aside></div>`;
+  if (!isAdmin()) return customerOverview();
+  const outstanding = state.invoices.reduce(
+    (sum, invoice) => sum + invoice.balance,
+    0,
+  );
+  const overdue = state.invoices.filter(
+    (invoice) => invoice.status === "overdue",
+  );
+  const collected = state.invoices.reduce(
+    (sum, invoice) => sum + invoice.paid,
+    0,
+  );
+  const pending = state.plans.filter((plan) => plan.status === "pending");
+  const stats = [
+    [
+      "Outstanding balance",
+      money(outstanding),
+      "Across all unpaid invoices",
+      "wallet",
+    ],
+    [
+      "Overdue balance",
+      money(overdue.reduce((sum, invoice) => sum + invoice.balance, 0)),
+      `${overdue.length} overdue invoice${overdue.length === 1 ? "" : "s"}`,
+      "clock",
+    ],
+    [
+      "Payments received",
+      money(collected),
+      "Recorded payments, all time",
+      "check",
+    ],
+    [
+      "Customers",
+      state.customers.length,
+      "Registered customer accounts",
+      "users",
+    ],
+  ];
+  return `${heading("ADMINISTRATION", `Welcome back, ${escape(state.user.full_name.split(" ")[0])}.`, "A clear view of your accounts, invoices, and payment requests.", createButton())}<div class="stats-grid">${stats.map(([label, value, note, symbol]) => `<section class="stat-card"><div class="stat-top"><span>${label}</span><span class="stat-icon">${icon(symbol)}</span></div><strong>${value}</strong><span class="stat-note">${note}</span></section>`).join("")}</div><div class="overview-grid"><section class="panel recent-panel"><div class="panel-heading"><div><h2>Recent invoices <span class="count-label">${state.invoices.length}</span></h2><p>Choose an invoice to view its charges and payments.</p></div><button class="text-button" data-view="invoices">View all ${icon("arrow")}</button></div>${invoiceTable(state.invoices.slice(0, 5), true)}</section><aside class="overview-aside"><section class="panel side-panel"><div class="panel-heading compact"><h2>Plan requests</h2>${icon("plan")}</div><div class="request-number">${pending.length}<span>awaiting your review</span></div><p class="muted side-copy">Review customer proposals and send a response.</p><button class="button secondary full" data-view="plans">Review requests ${icon("arrow")}</button></section><section class="help-card"><span class="eyebrow">CUSTOMER ACCESS</span><h3>A personal place for every account.</h3><p>Add a customer to give them access to their invoices and payment plans.</p><button class="text-button" data-action="new-customer">Add customer ${icon("plus")}</button></section></aside></div>`;
 }
 function invoiceToolbar() {
   return `<div class="invoice-toolbar"><div class="tabs" aria-label="Invoice status">${[
@@ -333,7 +303,7 @@ async function openInvoice(id) {
   const active = plans.find((p) => ["pending", "approved"].includes(p.status));
   showModal(
     "Invoice details",
-    `<div class="invoice-detail"><div class="invoice-paper-header"><div><div class="paper-brand">${icon("logo")} ${escape(state.config.business_name)}</div><h3>${escape(i.number)}</h3><p>${escape(i.description)}</p></div>${badge(i.status)}</div><div class="invoice-meta"><div><span>BILLED TO</span><strong>${escape(i.customer_name)}</strong><p>${escape(i.customer_email)}</p></div><div><span>ISSUED</span><strong>${day(i.issued_date)}</strong><span class="due-label">DUE DATE</span><strong>${day(i.due_date)}</strong></div></div><div class="table-scroll"><table class="line-table"><thead><tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th></tr></thead><tbody>${items.map((item) => `<tr><td>${escape(item.description)}</td><td>${item.quantity}</td><td>${money(item.unit_amount)}</td><td>${money(item.quantity * item.unit_amount)}</td></tr>`).join("")}</tbody></table></div><div class="invoice-totals"><div><span>Invoice total</span><strong>${money(i.total)}</strong></div><div><span>Payments received</span><strong>−${money(i.paid)}</strong></div><div class="total-due"><span>Balance due</span><strong>${money(i.balance)}</strong></div></div>${i.notes ? `<div class="invoice-notes"><strong>A note for you</strong><p>${escape(i.notes)}</p></div>` : ""}${payments.length ? `<section class="detail-section"><h3>Payment history</h3>${payments.map((p) => `<div class="payment-row"><span class="payment-check">${icon("check")}</span><div><strong>${escape(p.reference || "Payment received")}</strong><small>${day(p.paid_date)}</small></div><b>${money(p.amount)}</b></div>`).join("")}</section>` : ""}${active ? `<div class="invoice-plan-note">${icon("plan")}<div><strong>${active.status === "pending" ? "Payment plan requested" : "Payment plan approved"}</strong><p>${money(active.monthly_amount)} / month · First payment ${day(active.start_date)}</p>${active.admin_note ? `<p>${escape(active.admin_note)}</p>` : ""}</div></div>` : ""}</div><div class="invoice-dialog-footer"><button class="button secondary" data-action="print-invoice">${icon("print")} Print / Save PDF</button>${i.balance > 0 ? (isAdmin() ? `<button class="button primary" data-action="record-payment" data-id="${i.id}">${icon("plus")} Record payment</button>` : !active ? `<button class="button primary" data-action="request-plan" data-id="${i.id}">${icon("plan")} Request payment plan</button>` : "") : '<span class="paid-message">' + icon("check") + " Paid in full. Thank you.</span>"}</div>`,
+    `<div class="invoice-detail"><div class="invoice-paper-header"><div><div class="paper-brand"><img src="/brand/office-logo.png" class="invoice-logo" alt="The Office of Yash Sunder Raj logo" width="180" height="75"><span>${escape(state.config.business_name)}</span></div><h3>${escape(i.number)}</h3><p>${escape(i.description)}</p></div>${badge(i.status)}</div><div class="invoice-meta"><div><span>BILLED TO</span><strong>${escape(i.customer_name)}</strong><p>${escape(i.customer_email)}</p></div><div><span>ISSUED</span><strong>${day(i.issued_date)}</strong><span class="due-label">DUE DATE</span><strong>${day(i.due_date)}</strong></div></div><div class="table-scroll"><table class="line-table"><thead><tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th></tr></thead><tbody>${items.map((item) => `<tr><td>${escape(item.description)}</td><td>${item.quantity}</td><td>${money(item.unit_amount)}</td><td>${money(item.quantity * item.unit_amount)}</td></tr>`).join("")}</tbody></table></div><div class="invoice-totals"><div><span>Invoice total</span><strong>${money(i.total)}</strong></div><div><span>Payments received</span><strong>−${money(i.paid)}</strong></div><div class="total-due"><span>Balance due</span><strong>${money(i.balance)}</strong></div></div>${i.notes ? `<div class="invoice-notes"><strong>A note for you</strong><p>${escape(i.notes)}</p></div>` : ""}${payments.length ? `<section class="detail-section"><h3>Payment history</h3>${payments.map((p) => `<div class="payment-row"><span class="payment-check">${icon("check")}</span><div><strong>${escape(p.reference || "Payment received")}</strong><small>${day(p.paid_date)}</small></div><b>${money(p.amount)}</b></div>`).join("")}</section>` : ""}${active ? `<div class="invoice-plan-note">${icon("plan")}<div><strong>${active.status === "pending" ? "Payment plan requested" : "Payment plan approved"}</strong><p>${money(active.monthly_amount)} / month · First payment ${day(active.start_date)}</p>${active.admin_note ? `<p>${escape(active.admin_note)}</p>` : ""}</div></div>` : ""}</div><div class="invoice-dialog-footer"><button class="button secondary" data-action="print-invoice">${icon("print")} Print / Save PDF</button>${i.balance > 0 ? (isAdmin() ? `<button class="button primary" data-action="record-payment" data-id="${i.id}">${icon("plus")} Record payment</button>` : !active ? `<button class="button primary" data-action="request-plan" data-id="${i.id}">${icon("plan")} Request payment plan</button>` : "") : '<span class="paid-message">' + icon("check") + " Paid in full. Thank you.</span>"}</div>`,
     true,
   );
 }
@@ -384,7 +354,7 @@ function passwordForm(required = false) {
   return `<form id="password-form" class="${required ? "" : "modal-form"}"><p class="muted">${required ? "Choose your own password before opening your account." : "Use a unique password with at least 12 characters."}</p><label>Current ${required ? "temporary " : ""}password<input type="password" name="current_password" autocomplete="current-password" required maxlength="128"></label><label>New password<input type="password" name="new_password" autocomplete="new-password" minlength="12" maxlength="128" required></label><label>Confirm new password<input type="password" name="confirm_password" autocomplete="new-password" minlength="12" maxlength="128" required></label>${formEnd(required ? "Set password & continue" : "Update password", !required)}</form>`;
 }
 function renderPasswordRequired() {
-  app.innerHTML = `<main class="password-required"><div class="panel"><div class="login-icon">${icon("lock")}</div><h1>Make this account yours.</h1>${passwordForm(true)}<button class="text-button" data-action="logout">Sign out</button></div></main>`;
+  app.innerHTML = `<main class="password-required"><div class="password-brand">${portalBrand(true)}</div><div class="panel"><h1>Make this account yours.</h1>${passwordForm(true)}<button class="text-button" data-action="logout">Sign out</button></div></main>`;
 }
 
 document.addEventListener("click", async (event) => {
@@ -560,7 +530,7 @@ document.addEventListener("submit", async (event) => {
 async function init() {
   try {
     state.config = await api("/config");
-    document.title = `${state.config.business_name} · Billing portal`;
+    document.title = state.config.business_name;
     try {
       const { user } = await api("/me");
       state.user = user;

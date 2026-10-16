@@ -1,6 +1,8 @@
-# ClearLedger billing portal
+# The Office of Yash SR: Payment Portal
 
 A complete website with a database for managing what customers owe. It includes separate administrator and customer logins, itemized invoices, recorded payments, and payment plan requests. The interface works on phones and desktops, and invoices can be printed or saved as PDFs.
+
+The portal uses the Office's gold wordmark and charcoal color scheme, with locally hosted Glacial Indifference typography. Customers arrive at a focused **Total due** screen; invoices, payment plans, and account settings are available from the top menu. The same branding appears on sign-in, invoices, and the browser favicon. The font's SIL Open Font License is bundled in `public/fonts/OFL.txt`.
 
 This is an HTML/CSS/JavaScript frontend with a Node.js server and SQLite database. A domain points to the server running the app; static HTML hosting alone cannot run the database or account system.
 
@@ -103,14 +105,14 @@ The Compose configuration sets `NODE_ENV=production`, binds the app inside Docke
 
 The app reads environment variables. `npm start` does not automatically load `.env`; use `node --env-file=.env server.js` when running directly. Docker Compose reads `.env` for substitution and passes the relevant variables to the app. The Docker deployment uses a fresh real database, separate from the demo.
 
-| Variable        | Default                | Purpose                                                                           |
-| --------------- | ---------------------- | --------------------------------------------------------------------------------- |
-| `HOST`          | `127.0.0.1`            | Interface to listen on                                                            |
-| `PORT`          | `3000`                 | HTTP port                                                                         |
-| `DATABASE_PATH` | `.data/billing.sqlite` | Persistent SQLite file                                                            |
-| `BUSINESS_NAME` | `ClearLedger`          | Name shown in the portal and on invoices                                          |
-| `PUBLIC_ORIGIN` | Local HTTP origin      | Exact browser origin; required HTTPS origin in production, with no trailing slash |
-| `NODE_ENV`      | development            | Set `production` for public hosting                                               |
+| Variable        | Default                                 | Purpose                                                                           |
+| --------------- | --------------------------------------- | --------------------------------------------------------------------------------- |
+| `HOST`          | `127.0.0.1`                             | Interface to listen on                                                            |
+| `PORT`          | `3000`                                  | HTTP port                                                                         |
+| `DATABASE_PATH` | `.data/billing.sqlite`                  | Persistent SQLite file                                                            |
+| `BUSINESS_NAME` | `The Office of Yash SR: Payment Portal` | Name shown in the portal and on invoices                                          |
+| `PUBLIC_ORIGIN` | Local HTTP origin                       | Exact browser origin; required HTTPS origin in production, with no trailing slash |
+| `NODE_ENV`      | development                             | Set `production` for public hosting                                               |
 
 No external API keys are required. Customers can never query other customers' invoices or plan requests. Passwords use salted scrypt hashes; sessions expire after 12 hours and are stored as token hashes in SQLite. Login is throttled, state-changing requests require a matching origin, and production cookies require HTTPS. Password resets invalidate customer sessions; password changes revoke their other sessions. Login throttling is in-process and resets when the app restarts. Behind a shared reverse proxy, the IP throttle applies to failed logins across that proxy; account-based throttling also applies.
 

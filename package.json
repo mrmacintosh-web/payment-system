@@ -1,9 +1,9 @@
 {
-  "name": "clearledger-billing-portal",
+  "name": "office-of-yash-payment-portal",
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "A self-hosted billing portal with customer accounts, itemized invoices, and payment plan requests.",
+  "description": "The Office of Yash SR: Payment Portal — invoices, customer accounts, and payment plans.",
   "engines": {
     "node": ">=24.0.0"
   },

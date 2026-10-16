@@ -5,7 +5,7 @@ services:
     init: true
     environment:
       PUBLIC_ORIGIN: https://${DOMAIN:?Set DOMAIN in .env first}
-      BUSINESS_NAME: ${BUSINESS_NAME:-ClearLedger}
+      BUSINESS_NAME: "${BUSINESS_NAME:-The Office of Yash SR: Payment Portal}"
     volumes:
       - billing_data:/app/.data
     read_only: true

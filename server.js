@@ -132,7 +132,9 @@ export function buildServer(options = {}) {
       })
     : null;
   const businessName =
-    options.businessName || process.env.BUSINESS_NAME || "ClearLedger";
+    options.businessName ||
+    process.env.BUSINESS_NAME ||
+    "The Office of Yash SR: Payment Portal";
   const attempts = new Map();
   const dummyHash = hashPassword(randomBytes(24).toString("hex"));
   const cookieName = production ? "__Host-ledger_session" : "ledger_session";
@@ -177,13 +179,26 @@ export function buildServer(options = {}) {
           "/": ["index.html", "text/html"],
           "/app.js": ["app.js", "text/javascript"],
           "/styles.css": ["styles.css", "text/css"],
-          "/favicon.svg": ["favicon.svg", "image/svg+xml"],
+          "/favicon.png": ["brand/office-logo.png", "image/png"],
+          "/brand/office-logo.png": ["brand/office-logo.png", "image/png"],
+          "/fonts/glacial-indifference-regular.woff2": [
+            "fonts/glacial-indifference-regular.woff2",
+            "font/woff2",
+          ],
+          "/fonts/glacial-indifference-bold.woff2": [
+            "fonts/glacial-indifference-bold.woff2",
+            "font/woff2",
+          ],
+          "/fonts/OFL.txt": ["fonts/OFL.txt", "text/plain"],
         };
         if (!files[path]) fail(404, "Page not found.");
         const [file, type] = files[path];
         const body = await readFile(resolve(root, "public", file));
         res.writeHead(200, {
-          "Content-Type": `${type}; charset=utf-8`,
+          "Content-Type":
+            type.startsWith("text/") || type === "image/svg+xml"
+              ? `${type}; charset=utf-8`
+              : type,
           "Cache-Control": "no-cache",
         });
         res.end(req.method === "HEAD" ? undefined : body);
