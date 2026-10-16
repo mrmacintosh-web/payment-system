@@ -1,0 +1,18 @@
+{
+  "name": "clearledger-billing-portal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A self-hosted billing portal with customer accounts, itemized invoices, and payment plan requests.",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "demo": "node scripts/demo.js",
+    "create-admin": "node scripts/create-admin.js",
+    "test": "node --test --test-concurrency=1",
+    "backup": "node scripts/backup.js"
+  }
+}
