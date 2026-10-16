@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { normalizeOrigin } from "./lib/origin.js";
+import { createCsrfProtection } from "./lib/csrf.js";
 import {
   openDatabase,
   hashPassword,
@@ -121,6 +122,15 @@ export function buildServer(options = {}) {
     db.close();
     throw new Error("Demo mode cannot run in production.");
   }
+  const codespacesProxy =
+    !production &&
+    (options.codespacesProxy ?? Boolean(process.env.CODESPACE_NAME));
+  const csrf = codespacesProxy
+    ? createCsrfProtection({
+        secure: publicOrigin?.startsWith("https:"),
+        lifetime: SESSION_SECONDS,
+      })
+    : null;
   const businessName =
     options.businessName || process.env.BUSINESS_NAME || "ClearLedger";
   const attempts = new Map();
@@ -187,7 +197,12 @@ export function buildServer(options = {}) {
         return;
       }
       if (req.method === "GET" && path === "/api/config") {
-        json({ business_name: businessName, demo, currency: "USD" });
+        json({
+          business_name: businessName,
+          demo,
+          currency: "USD",
+          ...(csrf ? { csrf_token: csrf.issue(req, res) } : {}),
+        });
         return;
       }
       if (!["GET", "POST"].includes(req.method))
@@ -195,12 +210,14 @@ export function buildServer(options = {}) {
       if (req.method === "POST") {
         const expectedOrigin = publicOrigin || `http://${req.headers.host}`;
         if (
-          req.headers.origin !== expectedOrigin ||
+          (req.headers.origin !== expectedOrigin && !csrf?.verify(req)) ||
           req.headers["sec-fetch-site"] === "cross-site"
         )
           fail(
             403,
-            "Request origin is not allowed. Refresh the page and try again.",
+            csrf
+              ? "Browser verification failed. Refresh this tab after restarting the server with npm run codespaces."
+              : "Request origin is not allowed. Refresh the page and try again.",
           );
       }
       if (req.method === "POST" && path === "/api/login") {

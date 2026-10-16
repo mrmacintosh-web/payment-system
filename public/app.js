@@ -84,7 +84,15 @@ async function api(path, body) {
   try {
     response = await fetch(`/api${path}`, {
       method: body === undefined ? "GET" : "POST",
-      headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      headers:
+        body === undefined
+          ? {}
+          : {
+              "Content-Type": "application/json",
+              ...(state.config.csrf_token
+                ? { "X-Ledger-CSRF": state.config.csrf_token }
+                : {}),
+            },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   } catch {

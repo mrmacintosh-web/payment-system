@@ -35,9 +35,11 @@ npm run codespaces
 
 Open **Ports → 3000 → Open in Browser**. Keep the port visibility **Private** while testing. Use **Admin demo** or **Customer demo** on the login page. Leave the terminal running; Ctrl+C stops the app.
 
-The Codespaces command sets the exact HTTPS browser address using GitHub's environment variables, including the forwarded port. It overrides an old `PUBLIC_ORIGIN` value for this process and uses the separate demo database. Request-origin protection remains enabled.
+The Codespaces command sets the exact HTTPS browser address using GitHub's environment variables, including the forwarded port. It overrides an old `PUBLIC_ORIGIN` value for this process and uses the separate demo database. The `-3000.app.github.dev` address is the website; `github.dev` is the editor.
 
-If you see **Request origin is not allowed**, stop the running server with Ctrl+C, update using `git pull --ff-only origin main`, and run `npm run codespaces` again. Open the address printed in the terminal or use port 3000's browser button; an old tab for a different Codespace or port will not work. A custom `PORT` changes the port you need to forward and open. If startup reports that the port is already in use, stop the previous portal terminal first; do not leave an older server running on that port.
+Development tunnels can rewrite the request's Origin header to localhost. In Codespaces development mode, the app can also verify the browser using an HttpOnly host cookie and a matching HMAC token sent in a custom request header. Other websites cannot read this token, and explicit cross-site requests are still rejected. Tokens remain stable between tabs but expire when the server restarts: refresh the website after a restart. Production continues to require the configured exact origin.
+
+If you see **Request origin is not allowed** or **Browser verification failed**, stop the running server with Ctrl+C, update using `git pull --ff-only origin main`, and run `npm run codespaces` again. Refresh the website so it obtains a new browser-verification token. Open the address printed in the terminal or use port 3000's browser button; an old tab for a different Codespace or port will not work. A custom `PORT` changes the port you need to forward and open. If startup reports that the port is already in use, stop the previous portal terminal first; do not leave an older server running on that port.
 
 Codespaces is for development and testing. It can stop when idle, and deleting a Codespace deletes its local database. Use permanent hosting and backups for customer billing.
 

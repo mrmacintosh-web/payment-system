@@ -145,10 +145,14 @@ test(
       }
       assert.ok(ready, `Startup did not become ready: ${errors}`);
       assert.ok(output.includes(expectedOrigin));
-      const login = (origin) =>
+      const login = (origin, extraHeaders = {}) =>
         fetch(`${base}/api/login`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Origin: origin },
+          headers: {
+            "Content-Type": "application/json",
+            Origin: origin,
+            ...extraHeaders,
+          },
           body: JSON.stringify({
             email: "admin@demo.local",
             password: "DemoAdmin2026!",
@@ -175,6 +179,20 @@ test(
         (await invoices.json()).invoices.length,
         5,
         "the browser can authenticate and load seeded billing data",
+      );
+      const bootstrap = await fetch(`${base}/api/config`);
+      const csrfCookie = bootstrap.headers.get("set-cookie").split(";")[0];
+      const csrfToken = (await bootstrap.json()).csrf_token;
+      assert.equal(
+        (
+          await login("http://localhost:3000", {
+            Cookie: csrfCookie,
+            "X-Ledger-CSRF": csrfToken,
+            "Sec-Fetch-Site": "same-origin",
+          })
+        ).status,
+        200,
+        "the Codespaces command also handles a tunnel-rewritten Origin header",
       );
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
