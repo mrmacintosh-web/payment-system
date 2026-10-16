@@ -22,6 +22,25 @@ Open port **3000** in your development environment, or visit `http://localhost:3
 
 Keep demo accounts away from real billing information. Demo changes persist in the separate demo database between runs. Stop the demo before starting the real app on the same port.
 
+## Run in GitHub Codespaces
+
+Open this repository on GitHub, select **Code → Codespaces → Create codespace on main**, and use its terminal:
+
+```sh
+nvm install 24
+nvm use 24
+npm ci
+npm run codespaces
+```
+
+Open **Ports → 3000 → Open in Browser**. Keep the port visibility **Private** while testing. Use **Admin demo** or **Customer demo** on the login page. Leave the terminal running; Ctrl+C stops the app.
+
+The Codespaces command sets the exact HTTPS browser address using GitHub's environment variables, including the forwarded port. It overrides an old `PUBLIC_ORIGIN` value for this process and uses the separate demo database. Request-origin protection remains enabled.
+
+If you see **Request origin is not allowed**, stop the running server with Ctrl+C, update using `git pull --ff-only origin main`, and run `npm run codespaces` again. Open the address printed in the terminal or use port 3000's browser button; an old tab for a different Codespace or port will not work. A custom `PORT` changes the port you need to forward and open. If startup reports that the port is already in use, stop the previous portal terminal first; do not leave an older server running on that port.
+
+Codespaces is for development and testing. It can stop when idle, and deleting a Codespace deletes its local database. Use permanent hosting and backups for customer billing.
+
 ## Use your own data
 
 From the repository directory:

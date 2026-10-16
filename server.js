@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
+import { normalizeOrigin } from "./lib/origin.js";
 import {
   openDatabase,
   hashPassword,
@@ -98,7 +99,9 @@ async function readBody(req) {
 export function buildServer(options = {}) {
   const production =
     options.production ?? process.env.NODE_ENV === "production";
-  const publicOrigin = options.publicOrigin ?? process.env.PUBLIC_ORIGIN;
+  const publicOrigin = normalizeOrigin(
+    options.publicOrigin ?? process.env.PUBLIC_ORIGIN,
+  );
   if (
     production &&
     (!publicOrigin ||
