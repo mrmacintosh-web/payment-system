@@ -396,6 +396,7 @@ export function buildServer(options = {}) {
           db.prepare(
             "DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
           ).run(user.id, session.token_hash);
+          notifications.passwordChanged(user);
         });
         json({ ok: true });
         return;
@@ -547,23 +548,33 @@ export function buildServer(options = {}) {
             .due_date > "2100-12-31"
         )
           fail(400, "Choose an earlier first payment date.");
-        const id = db
-          .prepare(
-            "INSERT INTO plan_requests(invoice_id,customer_id,monthly_amount,start_date,message,term_months,fee_bps,fee_amount,balance_at_request,scheduled_total) VALUES(?,?,?,?,?,?,?,?,?,?)",
-          )
-          .run(
-            invoice.id,
-            user.id,
-            amount,
-            start,
-            text(body.message, "Message", 2000, true),
-            option?.months || 0,
-            option?.fee_bps || 0,
-            option?.fee_amount || 0,
-            invoice.balance,
-            option?.scheduled_total || 0,
-          ).lastInsertRowid;
-        json({ id: Number(id) }, 201);
+        const message = text(body.message, "Message", 2000, true);
+        const id = transaction(db, () => {
+          const id = Number(
+            db
+              .prepare(
+                "INSERT INTO plan_requests(invoice_id,customer_id,monthly_amount,start_date,message,term_months,fee_bps,fee_amount,balance_at_request,scheduled_total) VALUES(?,?,?,?,?,?,?,?,?,?)",
+              )
+              .run(
+                invoice.id,
+                user.id,
+                amount,
+                start,
+                message,
+                option?.months || 0,
+                option?.fee_bps || 0,
+                option?.fee_amount || 0,
+                invoice.balance,
+                option?.scheduled_total || 0,
+              ).lastInsertRowid,
+          );
+          notifications.planRequested(
+            db.prepare("SELECT * FROM plan_requests WHERE id=?").get(id),
+            invoice,
+          );
+          return id;
+        });
+        json({ id }, 201);
         return;
       }
       match = path.match(/^\/api\/invoices\/(\d+)\/payment-reports$/);
@@ -612,13 +623,7 @@ export function buildServer(options = {}) {
               ).lastInsertRowid,
           );
           notifications.paymentReport(
-            {
-              id,
-              method: body.method,
-              amount,
-              tip_amount: tip,
-              reference: body.reference,
-            },
+            db.prepare("SELECT * FROM payment_reports WHERE id=?").get(id),
             invoice,
           );
           return id;
@@ -699,6 +704,8 @@ export function buildServer(options = {}) {
           db.prepare(
             "UPDATE payment_reports SET status=?,admin_note=?,reviewed_by=?,reviewed_at=datetime('now'),payment_id=? WHERE id=?",
           ).run(body.status, note, user.id, paymentId, report.id);
+          if (body.status === "rejected")
+            notifications.paymentRejected(report, invoice, note);
           return receiptId;
         });
         json({ ok: true, receipt_id: receiptId });
@@ -726,24 +733,34 @@ export function buildServer(options = {}) {
           pass = password(body.password);
         if (db.prepare("SELECT id FROM users WHERE email=?").get(address))
           fail(409, "An account with this email already exists.");
-        const id = db
-          .prepare(
-            "INSERT INTO users(full_name,email,password_hash,role,must_change_password) VALUES(?,?,?,'customer',1)",
-          )
-          .run(fullName, address, hashPassword(pass)).lastInsertRowid;
-        json({ id: Number(id) }, 201);
+        const id = transaction(db, () => {
+          const id = Number(
+            db
+              .prepare(
+                "INSERT INTO users(full_name,email,password_hash,role,must_change_password) VALUES(?,?,?,'customer',1)",
+              )
+              .run(fullName, address, hashPassword(pass)).lastInsertRowid,
+          );
+          notifications.accountCreated({
+            id,
+            full_name: fullName,
+            email: address,
+          });
+          return id;
+        });
+        json({ id }, 201);
         return;
       }
       match = path.match(/^\/api\/customers\/(\d+)\/reset-password$/);
       if (match && req.method === "POST") {
         const body = await readBody(req);
         const pass = password(body.password);
-        if (
-          !db
-            .prepare("SELECT id FROM users WHERE id=? AND role='customer'")
-            .get(Number(match[1]))
-        )
-          fail(404, "Customer not found.");
+        const customer = db
+          .prepare(
+            "SELECT id,full_name,email FROM users WHERE id=? AND role='customer'",
+          )
+          .get(Number(match[1]));
+        if (!customer) fail(404, "Customer not found.");
         transaction(db, () => {
           db.prepare(
             "UPDATE users SET password_hash=?,must_change_password=1 WHERE id=?",
@@ -751,6 +768,7 @@ export function buildServer(options = {}) {
           db.prepare("DELETE FROM sessions WHERE user_id=?").run(
             Number(match[1]),
           );
+          notifications.passwordChanged(customer, true);
         });
         json({ ok: true });
         return;
@@ -965,6 +983,15 @@ export function buildServer(options = {}) {
           db.prepare(
             "UPDATE plan_requests SET status=?,admin_note=?,reviewed_by=?,reviewed_at=datetime('now') WHERE id=?",
           ).run(body.status, note, user.id, plan.id);
+          const reviewedInvoice = invoiceFor(invoice.id, user);
+          notifications.planReviewed(
+            presentPlan(
+              db,
+              { ...plan, status: body.status, admin_note: note },
+              reviewedInvoice,
+            ),
+            reviewedInvoice,
+          );
         });
         json({ ok: true });
         return;

@@ -360,7 +360,7 @@ async function openInvoice(id) {
 function newCustomer() {
   showModal(
     "Add a customer",
-    `<form id="customer-form" class="modal-form"><p class="muted">Create their account, then add an invoice. Share the temporary password securely.</p><label>Full name<input name="full_name" autocomplete="name" maxlength="100" placeholder="e.g. Alex Johnson" required></label><label>Email address<input name="email" type="email" autocomplete="off" maxlength="254" placeholder="alex@example.com" required></label><label>Temporary password<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required placeholder="At least 12 characters"></label><p class="field-hint">They’ll be required to change this at first sign-in. This app does not send invitation emails.</p>${formEnd("Create customer")}</form>`,
+    `<form id="customer-form" class="modal-form"><p class="muted">Create their account, then add an invoice. Share the temporary password securely.</p><label>Full name<input name="full_name" autocomplete="name" maxlength="100" placeholder="e.g. Alex Johnson" required></label><label>Email address<input name="email" type="email" autocomplete="off" maxlength="254" placeholder="alex@example.com" required></label><label>Temporary password<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required placeholder="At least 12 characters"></label><p class="field-hint">They’ll be required to change this at first sign-in. When email is configured, they receive the login address. Share their temporary password separately; it is never emailed.</p>${formEnd("Create customer")}</form>`,
   );
 }
 function itemRow() {

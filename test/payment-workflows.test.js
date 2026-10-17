@@ -18,6 +18,7 @@ async function fixture(options = {}) {
     mail: {
       apiKey: "test-only-key",
       from: "payments@example.com",
+      adminEmail: "",
       send: async (message, key) => {
         sent.push({ ...message, key });
       },
@@ -350,6 +351,337 @@ test("monthly dates preserve the original day, clamp month ends, and allocate ro
   );
 });
 
+test("plan requests notify both parties, and approval emails the exact fee and approved schedule once", async () => {
+  const f = await fixture();
+  try {
+    const id = await f.invoice("300.00", { discount_amount: "50.00" });
+    const route = `/invoices/${id}/plans`;
+    assert.equal(
+      (
+        await f.request(
+          route,
+          { term_months: 6, start_date: future },
+          f.customer,
+        )
+      ).status,
+      400,
+    );
+    assert.equal(
+      f.db.prepare("SELECT COUNT(*) n FROM email_outbox").get().n,
+      1,
+    );
+    const requested = await f.request(
+      route,
+      {
+        term_months: 6,
+        start_date: future,
+        accept_fee: true,
+        message: "Please consider this schedule.",
+      },
+      f.customer,
+    );
+    assert.equal(requested.status, 201);
+    assert.equal((await f.plan(id, 6)).status, 409);
+    await f.flushEmail();
+    assert.equal(f.sent.length, 3);
+    const adminNotice = f.sent.find((message) =>
+      message.subject.startsWith("Payment plan requested"),
+    );
+    const acknowledgment = f.sent.find((message) =>
+      message.subject.startsWith("Payment plan request received"),
+    );
+    assert.equal(adminNotice.recipient, "admin@example.com");
+    assert.match(adminNotice.body, /alex@example.com/);
+    assert.match(adminNotice.body, /Please consider this schedule/);
+    assert.match(adminNotice.body, /One-time plan fee: \$11.38 \(4.55%/);
+    assert.match(adminNotice.body, /No fee has been added/);
+    assert.equal(acknowledgment.recipient, "alex@example.com");
+    assert.match(acknowledgment.body, /not been approved/);
+    assert.equal((await f.details(id)).invoice.balance, 25000);
+    const decisionRoute = `/plans/${requested.data.id}/review`;
+    const decision = {
+      status: "approved",
+      admin_note: "Your requested dates work.",
+    };
+    assert.equal(
+      (await f.request(decisionRoute, decision, f.other)).status,
+      403,
+    );
+    assert.equal(
+      (await f.request(decisionRoute, decision, f.admin)).status,
+      200,
+    );
+    assert.equal(
+      (await f.request(decisionRoute, decision, f.admin)).status,
+      409,
+    );
+    await f.flushEmail();
+    assert.equal(f.sent.length, 4);
+    const approval = f.sent.at(-1);
+    assert.equal(approval.recipient, "alex@example.com");
+    assert.match(approval.subject, /Payment plan approved/);
+    assert.match(approval.body, /One-time plan fee: \$11.38/);
+    assert.match(approval.body, /Current balance: \$261.38/);
+    assert.match(approval.body, /Your requested dates work/);
+    assert.match(approval.body, /Payments are not automatic/);
+    for (const installment of (await f.details(id)).plans[0].installments)
+      assert.ok(
+        approval.body.includes(
+          `${installment.due_date}: $${(installment.amount / 100).toFixed(2)}`,
+        ),
+      );
+    assert.ok(
+      !f.sent.some((message) => message.recipient === "other@example.com"),
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("declined plan emails include the admin response, preserve balances, and allow a fresh request", async () => {
+  const f = await fixture();
+  try {
+    const id = await f.invoice("50.00");
+    const requested = await f.plan(id);
+    const route = `/plans/${requested.data.id}/review`;
+    assert.equal(
+      (
+        await f.request(
+          route,
+          {
+            status: "declined",
+            admin_note: "Please choose a later start date.",
+          },
+          f.admin,
+        )
+      ).status,
+      200,
+    );
+    assert.equal(
+      (await f.request(route, { status: "declined" }, f.admin)).status,
+      409,
+    );
+    assert.equal((await f.details(id)).invoice.balance, 5000);
+    await f.flushEmail();
+    assert.equal(f.sent.length, 4);
+    const decline = f.sent.at(-1);
+    assert.equal(decline.recipient, "alex@example.com");
+    assert.match(decline.subject, /Payment plan declined/);
+    assert.match(decline.body, /Please choose a later start date/);
+    assert.match(decline.body, /No plan fee was added/);
+    assert.match(decline.body, /Current balance: \$50.00/);
+    assert.ok(!decline.body.includes("Approved payment schedule"));
+    assert.equal((await f.plan(id)).status, 201);
+    await f.flushEmail();
+    assert.equal(f.sent.length, 6);
+  } finally {
+    await f.close();
+  }
+});
+
+test("legacy proposed monthly plans receive accurate approval emails without a fixed fee or invented schedule", async () => {
+  const f = await fixture();
+  try {
+    const id = await f.invoice("100.00");
+    f.db
+      .prepare("UPDATE invoices SET payment_policy='legacy' WHERE id=?")
+      .run(id);
+    const plan = await f.request(
+      `/invoices/${id}/plans`,
+      { monthly_amount: "12.00", start_date: future },
+      f.customer,
+    );
+    assert.equal(plan.status, 201);
+    assert.equal(
+      (
+        await f.request(
+          `/plans/${plan.data.id}/review`,
+          { status: "approved" },
+          f.admin,
+        )
+      ).status,
+      200,
+    );
+    await f.flushEmail();
+    const approval = f.sent.find((message) =>
+      message.subject.startsWith("Payment plan approved"),
+    );
+    assert.match(approval.body, /Approved monthly amount: \$12.00/);
+    assert.ok(approval.body.includes(`First payment date: ${future}`));
+    assert.ok(!approval.body.includes("One-time plan fee"));
+    assert.ok(!approval.body.includes("Approved payment schedule"));
+    assert.equal((await f.details(id)).invoice.balance, 10000);
+  } finally {
+    await f.close();
+  }
+});
+
+test("admin notices use the configured inbox or every admin account without including unrelated customers", async () => {
+  for (const override of ["", "office@example.com"]) {
+    const sent = [];
+    const f = await fixture({
+      mail: {
+        apiKey: "test-only",
+        from: "payments@example.com",
+        adminEmail: override,
+        send: async (message) => sent.push(message),
+      },
+    });
+    try {
+      f.db
+        .prepare(
+          "INSERT INTO users(full_name,email,password_hash,role) VALUES(?,?,?,'admin')",
+        )
+        .run(
+          "Second Admin",
+          "second-admin@example.com",
+          hashPassword(password),
+        );
+      const id = await f.invoice("50.00");
+      const plan = await f.plan(id);
+      assert.equal(
+        (
+          await f.request(
+            `/plans/${plan.data.id}/review`,
+            { status: "declined" },
+            f.admin,
+          )
+        ).status,
+        200,
+      );
+      const notice = await f.request(
+        `/invoices/${id}/payment-reports`,
+        { method: "zelle", amount: "50.00", attestation: true },
+        f.customer,
+      );
+      assert.equal(
+        (
+          await f.request(
+            `/payment-reports/${notice.data.id}/review`,
+            { status: "confirmed", verified: true, paid_date: today },
+            f.admin,
+          )
+        ).status,
+        200,
+      );
+      await f.flushEmail();
+      // The worker intentionally processes at most ten messages at a time.
+      await f.flushEmail();
+      const expected = override
+        ? [override]
+        : ["admin@example.com", "second-admin@example.com"];
+      for (const prefix of [
+        "Payment plan requested",
+        "Verify",
+        "Payment recorded",
+      ])
+        assert.deepEqual(
+          sent
+            .filter((message) => message.subject.startsWith(prefix))
+            .map((message) => message.recipient)
+            .sort(),
+          expected,
+        );
+      assert.ok(
+        !sent.some((message) => message.recipient === "other@example.com"),
+      );
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test("account and password notices contain sign-in guidance without credentials, and repeated changes each notify the owner", async () => {
+  const f = await fixture();
+  try {
+    const temp = "TemporaryPassword2026!",
+      next = "ChosenPassword2026!",
+      reset = "ResetPassword2026!";
+    const created = await f.request(
+      "/customers",
+      { full_name: "New Customer", email: "new@example.com", password: temp },
+      f.admin,
+    );
+    assert.equal(created.status, 201);
+    assert.equal(
+      (
+        await f.request(
+          "/customers",
+          { full_name: "Duplicate", email: "new@example.com", password: temp },
+          f.admin,
+        )
+      ).status,
+      409,
+    );
+    const login = await f.request("/login", {
+      email: "new@example.com",
+      password: temp,
+    });
+    assert.equal(login.status, 200);
+    assert.equal(
+      (
+        await f.request(
+          "/change-password",
+          { current_password: "wrong", new_password: next },
+          login.cookie,
+        )
+      ).status,
+      400,
+    );
+    assert.equal(
+      (
+        await f.request(
+          "/change-password",
+          { current_password: temp, new_password: next },
+          login.cookie,
+        )
+      ).status,
+      200,
+    );
+    // A second valid change must not be suppressed by event deduplication.
+    assert.equal(
+      (
+        await f.request(
+          "/change-password",
+          { current_password: next, new_password: temp },
+          login.cookie,
+        )
+      ).status,
+      200,
+    );
+    const resetRoute = `/customers/${created.data.id}/reset-password`;
+    assert.equal(
+      (await f.request(resetRoute, { password: "short" }, f.admin)).status,
+      400,
+    );
+    assert.equal(
+      (await f.request(resetRoute, { password: reset }, f.admin)).status,
+      200,
+    );
+    assert.equal((await f.request("/me", undefined, login.cookie)).status, 401);
+    await f.flushEmail();
+    assert.equal(f.sent.length, 4);
+    assert.match(f.sent[0].subject, /account is ready/);
+    assert.match(f.sent[0].body, /shared separately/);
+    assert.equal(
+      f.sent.filter((message) =>
+        message.subject.endsWith("password was changed"),
+      ).length,
+      2,
+    );
+    assert.match(f.sent.at(-1).subject, /password was reset/);
+    for (const message of f.sent) {
+      assert.equal(message.recipient, "new@example.com");
+      assert.ok(message.body.includes("https://payments.yashsr.com"));
+      for (const secret of [password, temp, next, reset, login.cookie])
+        assert.ok(!JSON.stringify(message).includes(secret));
+      assert.ok(!message.body.includes("scrypt"));
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test("customer declarations leave debt unchanged, require attestation, and admin verification issues one private receipt", async () => {
   const f = await fixture();
   try {
@@ -442,7 +774,7 @@ test("customer declarations leave debt unchanged, require attestation, and admin
       403,
     );
     await f.flushEmail();
-    assert.equal(f.sent.length, 3);
+    assert.equal(f.sent.length, 5);
     const noticeEmail = f.sent.find((message) =>
       message.subject.startsWith("Verify"),
     );
@@ -454,8 +786,20 @@ test("customer declarations leave debt unchanged, require attestation, and admin
     assert.equal(receiptEmail.recipient, "alex@example.com");
     assert.match(receiptEmail.body, /\$80.00/);
     assert.match(receiptEmail.body, /https:\/\/payments.yashsr.com/);
+    const acknowledgment = f.sent.find((message) =>
+      message.subject.startsWith("Payment notice received"),
+    );
+    assert.equal(acknowledgment.recipient, "alex@example.com");
+    assert.match(acknowledgment.body, /pending review by an administrator/);
+    assert.match(acknowledgment.body, /balance has not changed yet/);
+    const adminReceipt = f.sent.find((message) =>
+      message.subject.startsWith("Payment recorded"),
+    );
+    assert.equal(adminReceipt.recipient, "admin@example.com");
+    assert.match(adminReceipt.body, /Total received: \$80.00/);
+    assert.match(adminReceipt.body, /Remaining balance: \$0.00/);
     await f.flushEmail();
-    assert.equal(f.sent.length, 3, "sent mail is not resent");
+    assert.equal(f.sent.length, 5, "sent mail is not resent");
   } finally {
     await f.close();
   }
@@ -482,6 +826,34 @@ test("rejected notices preserve debt and allow another attempt; receipts retain 
       200,
     );
     assert.equal((await f.details(id)).invoice.balance, 10000);
+    assert.equal(
+      (await f.request("/receipts", undefined, f.customer)).data.receipts
+        .length,
+      0,
+    );
+    assert.equal(
+      (
+        await f.request(
+          `/payment-reports/${notice.data.id}/review`,
+          { status: "rejected" },
+          f.admin,
+        )
+      ).status,
+      409,
+    );
+    await f.flushEmail();
+    const rejection = f.sent.filter((message) =>
+      message.subject.startsWith("Payment could not be verified"),
+    );
+    assert.equal(rejection.length, 1);
+    assert.equal(rejection[0].recipient, "alex@example.com");
+    assert.match(rejection[0].body, /I could not find this transfer/);
+    assert.match(rejection[0].body, /Current balance: \$100.00/);
+    assert.match(
+      rejection[0].body,
+      /contact The Office of Yash SR before sending it again/,
+    );
+    assert.match(rejection[0].body, /zelle/);
     assert.equal((await f.payment(id, "25.00")).status, 201);
     assert.equal((await f.payment(id, "75.00")).status, 201);
     const receipts = (await f.request("/receipts", undefined, f.customer)).data
@@ -528,13 +900,13 @@ test("mail failures stay queued without affecting money or receipts, and retry u
     );
     let status = (await f.request("/email-status", undefined, f.admin)).data;
     assert.equal(status.enabled, true);
-    assert.equal(status.pending, 2);
+    assert.equal(status.pending, 3);
     f.db.prepare("UPDATE email_outbox SET next_attempt=0").run();
     shouldFail = false;
     await f.flushEmail();
     status = (await f.request("/email-status", undefined, f.admin)).data;
-    assert.equal(status.sent, 2);
-    assert.deepEqual(attempts.slice(0, 2), attempts.slice(2));
+    assert.equal(status.sent, 3);
+    assert.deepEqual(attempts.slice(0, 3), attempts.slice(3));
   } finally {
     await f.close();
   }
@@ -653,7 +1025,7 @@ test("the Resend adapter constructs an authenticated text-email request without 
     const id = await f.invoice("50.00");
     await f.payment(id, "50.00");
     await f.flushEmail();
-    assert.equal(outgoing.length, 2);
+    assert.equal(outgoing.length, 3);
     assert.match(JSON.parse(outgoing[0].body).subject, /Your invoice is ready/);
     const request = outgoing[1],
       body = JSON.parse(request.body);
