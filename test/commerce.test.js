@@ -387,6 +387,13 @@ test("legacy databases upgrade repeatedly without changing debts, history, or sa
       assert.equal(invoice.total, 20000);
       assert.equal(invoice.balance, 15000);
       assert.equal(invoice.discount_amount, 0);
+      assert.equal(invoice.payment_policy, "legacy");
+      assert.equal(invoice.plan_fee, 0);
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM receipts").get().n, 0);
+      assert.equal(
+        db.prepare("SELECT COUNT(*) AS n FROM email_outbox").get().n,
+        0,
+      );
       const payment = db.prepare("SELECT * FROM payments WHERE id=1").get();
       assert.equal(payment.amount, 5000);
       assert.equal(payment.tip_amount, 0);

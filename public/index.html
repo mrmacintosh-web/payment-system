@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-display="soft">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -26,6 +26,14 @@
       <div class="initial-loading">Opening your billing portal…</div>
     </div>
     <dialog id="modal" aria-labelledby="modal-title"></dialog>
+    <button
+      id="display-toggle"
+      class="display-toggle"
+      data-action="toggle-display"
+      aria-pressed="true"
+    >
+      Soft display: On
+    </button>
     <div id="toast" role="status" aria-live="polite"></div>
   </body>
 </html>

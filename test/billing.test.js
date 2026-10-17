@@ -128,9 +128,10 @@ test("complete billing flow: account setup, itemized invoice, partial payment, p
     const plan = await f.request(`/invoices/${id}/plans`, {
       cookie: client,
       body: {
-        monthly_amount: "50.00",
+        term_months: 3,
+        accept_fee: true,
         start_date: future,
-        message: "Four installments, please.",
+        message: "Three installments, please.",
       },
     });
     assert.equal(plan.status, 201);
@@ -138,7 +139,7 @@ test("complete billing flow: account setup, itemized invoice, partial payment, p
       (
         await f.request(`/invoices/${id}/plans`, {
           cookie: client,
-          body: { monthly_amount: "50.00", start_date: future },
+          body: { term_months: 3, accept_fee: true, start_date: future },
         })
       ).status,
       409,
@@ -171,7 +172,7 @@ test("complete billing flow: account setup, itemized invoice, partial payment, p
       (
         await f.request(`/invoices/${id}/payments`, {
           cookie: admin,
-          body: { amount: "200.00", paid_date: today },
+          body: { amount: "204.74", paid_date: today },
         })
       ).status,
       201,
@@ -451,7 +452,7 @@ test("declined plans can be resubmitted; overdue balances are derived from dates
     const request = () =>
       f.request(`/invoices/${invoice.data.id}/plans`, {
         cookie: client,
-        body: { monthly_amount: "25", start_date: future },
+        body: { term_months: 3, accept_fee: true, start_date: future },
       });
     const first = await request();
     assert.equal(first.status, 201);

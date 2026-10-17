@@ -2,7 +2,9 @@
 
 A complete website with a database for managing what customers owe. It includes separate administrator and customer logins, itemized invoices, recorded payments, and payment plan requests. The interface works on phones and desktops, and invoices can be printed or saved as PDFs.
 
-The portal uses the Office's gold wordmark and charcoal color scheme, with locally hosted Glacial Indifference typography. Customers arrive at a focused **Total due** screen; invoices, payment plans, and account settings are available from the top menu. The same branding appears on sign-in, invoices, and the browser favicon. The font's SIL Open Font License is bundled in `public/fonts/OFL.txt`.
+The portal uses the Office's gold wordmark and a warm cream **Soft display** by default, with a charcoal theme available through the display toggle, and locally hosted Glacial Indifference typography. Customers arrive at a focused **Total due** screen; invoices, payment plans, and account settings are available from the top menu. The same branding appears on sign-in, invoices, and the browser favicon. The font's SIL Open Font License is bundled in `public/fonts/OFL.txt`.
+
+**For your Cloudflare domain:** follow [the step-by-step payments.yashsr.com deployment guide](DEPLOYMENT.md). It covers hosting, DNS, HTTPS, backups, and optional email.
 
 This is an HTML/CSS/JavaScript frontend with a Node.js server and SQLite database. A domain points to the server running the app; static HTML hosting alone cannot run the database or account system.
 
@@ -60,11 +62,39 @@ The first command to create an administrator asks for a password without display
 1. Sign in as the administrator. Open **Customers → Add customer** and create the customer's temporary password.
 2. Share their email, portal address, and temporary password securely. Invitation and password reset emails are not sent automatically. Customers must choose a new password at first sign-in. An administrator can reset customer access from the Customers page.
 3. Use **Create invoice** to choose a customer, enter the due date, and add descriptions, quantities, and prices for each individual charge. Add an optional **Discount amount ($)** and label such as “Holiday sale” to subtract a dollar amount from the charges. The invoice is immediately visible to that customer.
-4. Customers see their own outstanding balance, due dates, line items, payment history, and plan requests. They can open an unpaid invoice and propose a monthly payment and start date.
+4. Customers see their own outstanding balance, due dates, line items, payment history, and plan requests. They can open an unpaid invoice and request an eligible fixed-term plan, with the fee and installments shown before consent.
 5. Open **Plan requests** as administrator to approve or decline, with a response visible to the customer.
-6. Use **Record payment** on an invoice after receiving money. Enter the amount applied to the invoice, any tip received separately, and the payment method. The balance and paid status update immediately. Tips appear in payment history but do not reduce the amount owed on the invoice.
+6. Use **Record payment** on an invoice after receiving money. Enter the amount applied to the invoice, any tip received separately, and the payment method. The balance and paid status update immediately, and a permanent receipt appears under **Receipts** in the customer dashboard. Tips appear in payment history but do not reduce the amount owed on the invoice.
 
-All amounts are **USD**. Quantities are whole numbers; prices support two decimal places. A discount cannot exceed the charges subtotal; a fully discounted invoice has no balance due. Plans are proposals and approvals recorded in the portal. They do not automatically change due dates, collect money, charge cards, or schedule debits. Arrange payment directly and record it as received. Automatic payment processing, email notifications, tax calculations, invoice editing/voiding, automatic reminders, and multi-business tenancy are not included.
+All amounts are **USD**. Quantities are whole numbers; prices support two decimal places. A discount cannot exceed the charges subtotal; a fully discounted invoice has no balance due. Plans are requests reviewed by the administrator. Approval of a new fixed-term plan adds its disclosed one-time fee and a dated installment schedule. The original invoice due date stays visible. Plans do not collect money, charge cards, or schedule debits. Arrange payment directly and record it as received. Automatic payment processing, tax calculations, invoice editing/voiding, automatic reminders, and multi-business tenancy are not included.
+
+## Pay-in-full invoices and monthly plans
+
+On **Create invoice → Payment options**, choose **Pay in full only** or **Allow eligible 3- or 6-month plans** (the default for new invoices).
+
+| Purchase total after discounts | Available plans                             |
+| ------------------------------ | ------------------------------------------- |
+| Below $50                      | Pay in full                                 |
+| $50–$249.99                    | 3 months with a one-time 2.25% fee          |
+| $250 or more                   | 3 months with 2.25%, or 6 months with 4.55% |
+
+The fee is calculated once on the **entire discounted purchase**, excluding tips, even if part of the purchase has already been paid. It is rounded to the nearest cent, with half cents rounded up. It is not a monthly or compounded charge. For example, a $250 purchase on six months has an $11.38 fee and $261.38 total: five $43.56 installments and one final $43.58 installment. Rounding is allocated to the final payment so the schedule sums exactly.
+
+Customers see the fee, total, and installments and must consent before submitting. **Requests do not add fees.** Approval adds the fee once and creates the schedule; declining does not. A balance change after a request requires declining and requesting a new quote. Month-end dates clamp to the last day of short months and then return to the original day in later months. Payments apply to installments in order; tips do not affect installment balances. After approval the payment screen prefills the next unpaid installment, and customers can also pay extra or the full balance.
+
+Pay-in-full invoices reject plan requests and partial payments on the server. For other invoices, an administrator can still record an actual partial payment received. Existing invoices and older custom plans retain their original behavior and balances; no new fee is added to old approvals. These new policy choices apply when creating new invoices.
+
+## Receipts and payment verification
+
+Every newly recorded payment creates an immutable receipt, including the customer, itemized charges, discount, plan fee, payment method, invoice amount, tip, and balance **at the time of that payment**. Customers can open **Receipts** from the top menu or dashboard, then **Print / Save PDF**. Partial payments also receive receipts. Earlier receipts do not change when later payments are recorded. Historical payments are preserved without generating retroactive receipts or emails.
+
+After sending money, a customer can choose **I paid with Venmo/Zelle**, enter a reference, and confirm that they actually sent the payment. This creates a notice under the administrator's **Payment notices** menu; it does not mark the invoice paid. Only one notice per invoice can await review. The administrator checks the receiving account, then confirms the exact amount and date or rejects with a response. Confirmation records the payment and receipt together. Repeated confirmation cannot record it twice. While a notice is pending, direct manual recording is blocked to avoid counting the same money again; review the notice first.
+
+Optional thank-you emails and administrator payment notices use Resend. They require a verified sender, `RESEND_API_KEY`, `MAIL_FROM`, and a production HTTPS `PUBLIC_ORIGIN`. See [email setup](DEPLOYMENT.md#optional-receipt-and-administrator-emails). Portal receipts work without email, and demo mode never sends mail.
+
+## Display options
+
+**Soft display: On** is the default, with warm cream surfaces, darker text, muted gold accents, and no animations, glow, or backdrop blur. Use the persistent button to switch to the original dark palette. The preference is saved in this browser when local storage is available. Glacial Indifference and the Office logo remain in both modes.
 
 ## Cash, Venmo, Zelle, and optional tips
 
@@ -78,7 +108,7 @@ Customers open an unpaid invoice and choose **Make a payment**. They can select 
 
 Unconfigured details show a clear placeholder; no real recipient or working QR code is invented. Customers send money in their own app or pay you in person. Selecting a method or tip does **not** send money, change the invoice debt, or mark it paid. Verify receipt, then record the invoice portion and tip separately. For example, if $80 is owed and you receive $90 including a $10 tip, record **Amount toward invoice: $80** and **Tip received: $10**. The invoice is paid and the $10 gratuity remains separately visible. The administrator's Payments received summary includes both recorded invoice payments and tips.
 
-Existing databases upgrade automatically on startup by adding defaulted discount/tip/method fields and the payment-settings table. Existing balances and payment history are retained. Back up production data before updating.
+Existing databases upgrade automatically on startup with additive columns and tables for discounts, tips, policies, schedules, receipts, notices, and the optional email outbox. Existing balances and payment history are retained. Back up production data before updating.
 
 ## Connect a domain and go live
 
@@ -119,16 +149,19 @@ The Compose configuration sets `NODE_ENV=production`, binds the app inside Docke
 
 The app reads environment variables. `npm start` does not automatically load `.env`; use `node --env-file=.env server.js` when running directly. Docker Compose reads `.env` for substitution and passes the relevant variables to the app. The Docker deployment uses a fresh real database, separate from the demo.
 
-| Variable        | Default                                 | Purpose                                                                           |
-| --------------- | --------------------------------------- | --------------------------------------------------------------------------------- |
-| `HOST`          | `127.0.0.1`                             | Interface to listen on                                                            |
-| `PORT`          | `3000`                                  | HTTP port                                                                         |
-| `DATABASE_PATH` | `.data/billing.sqlite`                  | Persistent SQLite file                                                            |
-| `BUSINESS_NAME` | `The Office of Yash SR: Payment Portal` | Name shown in the portal and on invoices                                          |
-| `PUBLIC_ORIGIN` | Local HTTP origin                       | Exact browser origin; required HTTPS origin in production, with no trailing slash |
-| `NODE_ENV`      | development                             | Set `production` for public hosting                                               |
+| Variable         | Default                                 | Purpose                                                                           |
+| ---------------- | --------------------------------------- | --------------------------------------------------------------------------------- |
+| `HOST`           | `127.0.0.1`                             | Interface to listen on                                                            |
+| `PORT`           | `3000`                                  | HTTP port                                                                         |
+| `DATABASE_PATH`  | `.data/billing.sqlite`                  | Persistent SQLite file                                                            |
+| `BUSINESS_NAME`  | `The Office of Yash SR: Payment Portal` | Name shown in the portal and on invoices                                          |
+| `PUBLIC_ORIGIN`  | Local HTTP origin                       | Exact browser origin; required HTTPS origin in production, with no trailing slash |
+| `NODE_ENV`       | development                             | Set `production` for public hosting                                               |
+| `RESEND_API_KEY` | unset                                   | Optional private Resend send-mail API key                                         |
+| `MAIL_FROM`      | unset                                   | Verified sender email for optional notifications                                  |
+| `ADMIN_EMAIL`    | administrator account emails            | Optional inbox override for payment notices                                       |
 
-No external API keys are required. Customers can never query other customers' invoices or plan requests. Passwords use salted scrypt hashes; sessions expire after 12 hours and are stored as token hashes in SQLite. Login is throttled, state-changing requests require a matching origin, and production cookies require HTTPS. Password resets invalidate customer sessions; password changes revoke their other sessions. Login throttling is in-process and resets when the app restarts. Behind a shared reverse proxy, the IP throttle applies to failed logins across that proxy; account-based throttling also applies.
+No external API keys are required for the portal. Optional email delivery requires a Resend key; see [DEPLOYMENT.md](DEPLOYMENT.md#optional-receipt-and-administrator-emails). Customers can never query other customers' invoices or plan requests. Passwords use salted scrypt hashes; sessions expire after 12 hours and are stored as token hashes in SQLite. Login is throttled, state-changing requests require a matching origin, and production cookies require HTTPS. Password resets invalidate customer sessions; password changes revoke their other sessions. Login throttling is in-process and resets when the app restarts. Behind a shared reverse proxy, the IP throttle applies to failed logins across that proxy; account-based throttling also applies.
 
 ## Backups and updates
 

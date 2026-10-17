@@ -5,6 +5,9 @@ import { resolve, dirname } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { normalizeOrigin } from "./lib/origin.js";
 import { createCsrfProtection } from "./lib/csrf.js";
+import { planOptions, makeSchedule, presentPlan } from "./lib/plans.js";
+import { createNotifications } from "./lib/notifications.js";
+import { createReceipt, listReceipts } from "./lib/receipts.js";
 import {
   getPaymentSettings,
   savePaymentSettings,
@@ -72,15 +75,18 @@ const date = (value, label) => {
     fail(400, `Enter a valid ${label}.`);
   return value;
 };
-const cents = (value, label = "Amount") => {
+const cents = (value, label = "Amount", maximum = MAX_CENTS) => {
   if (typeof value !== "string" || !/^\d{1,7}(\.\d{1,2})?$/.test(value))
     fail(
       400,
       `${label} must be a positive amount with up to two decimal places.`,
     );
   const result = Math.round(Number(value) * 100);
-  if (result < 1 || result > MAX_CENTS)
-    fail(400, `${label} must be between $0.01 and $1,000,000.`);
+  if (result < 1 || result > maximum)
+    fail(
+      400,
+      `${label} must be between $0.01 and $${(maximum / 100).toLocaleString("en-US")}.`,
+    );
   return result;
 };
 const optionalCents = (value, label) => {
@@ -148,6 +154,12 @@ export function buildServer(options = {}) {
     process.env.BUSINESS_NAME ||
     "The Office of Yash SR: Payment Portal";
   const attempts = new Map();
+  const notifications = createNotifications(db, {
+    demo,
+    publicOrigin,
+    businessName,
+    mail: options.mail,
+  });
   const dummyHash = hashPassword(randomBytes(24).toString("hex"));
   const cookieName = production ? "__Host-ledger_session" : "ledger_session";
   const cookie = (token, age) =>
@@ -336,6 +348,22 @@ export function buildServer(options = {}) {
       }
       if (user.must_change_password)
         fail(403, "Change your temporary password before continuing.");
+      if (path === "/api/receipts" && req.method === "GET") {
+        json({ receipts: listReceipts(db, user) });
+        return;
+      }
+      if (path === "/api/payment-reports" && req.method === "GET") {
+        const query =
+          "SELECT r.*,i.number AS invoice_number,u.full_name AS customer_name FROM payment_reports r JOIN invoices i ON i.id=r.invoice_id JOIN users u ON u.id=r.customer_id";
+        json({
+          reports: db
+            .prepare(
+              `${query} ${user.role === "admin" ? "" : "WHERE r.customer_id=?"} ORDER BY r.id DESC`,
+            )
+            .all(...(user.role === "admin" ? [] : [user.id])),
+        });
+        return;
+      }
       if (path === "/api/payment-settings" && req.method === "GET") {
         json({ payment_settings: getPaymentSettings(db) });
         return;
@@ -365,11 +393,18 @@ export function buildServer(options = {}) {
               "SELECT id,amount,tip_amount,method,paid_date,reference FROM payments WHERE invoice_id=? ORDER BY paid_date DESC,id DESC",
             )
             .all(invoice.id),
-          plans: db
+          plan_options: planOptions(invoice),
+          reports: db
             .prepare(
-              "SELECT id,monthly_amount,start_date,message,status,admin_note,created_at,reviewed_at FROM plan_requests WHERE invoice_id=? ORDER BY id DESC",
+              "SELECT * FROM payment_reports WHERE invoice_id=? ORDER BY id DESC",
             )
             .all(invoice.id),
+          plans: db
+            .prepare(
+              "SELECT * FROM plan_requests WHERE invoice_id=? ORDER BY id DESC",
+            )
+            .all(invoice.id)
+            .map((plan) => presentPlan(db, plan, invoice)),
         });
         return;
       }
@@ -378,10 +413,18 @@ export function buildServer(options = {}) {
         json({
           plans:
             user.role === "admin"
-              ? db.prepare(`${query} ORDER BY p.id DESC`).all()
+              ? db
+                  .prepare(`${query} ORDER BY p.id DESC`)
+                  .all()
+                  .map((plan) =>
+                    presentPlan(db, plan, invoiceFor(plan.invoice_id, user)),
+                  )
               : db
                   .prepare(`${query} WHERE p.customer_id=? ORDER BY p.id DESC`)
-                  .all(user.id),
+                  .all(user.id)
+                  .map((plan) =>
+                    presentPlan(db, plan, invoiceFor(plan.invoice_id, user)),
+                  ),
         });
         return;
       }
@@ -393,6 +436,22 @@ export function buildServer(options = {}) {
         const invoice = invoiceFor(Number(match[1]), user);
         if (invoice.balance <= 0)
           fail(400, "This invoice has already been paid.");
+        if (invoice.payment_policy === "full")
+          fail(
+            400,
+            "This invoice must be paid in full. Payment plans are not available.",
+          );
+        if (
+          db
+            .prepare(
+              "SELECT id FROM payment_reports WHERE invoice_id=? AND status='pending'",
+            )
+            .get(invoice.id)
+        )
+          fail(
+            409,
+            "Wait for the pending payment notice to be reviewed before requesting a plan.",
+          );
         if (
           db
             .prepare(
@@ -404,15 +463,39 @@ export function buildServer(options = {}) {
             409,
             "This invoice already has an active plan or a pending request.",
           );
-        const amount = cents(body.monthly_amount, "Monthly amount");
-        if (amount > invoice.balance)
+        const option =
+          invoice.payment_policy === "eligible"
+            ? planOptions(invoice).find(
+                (term) => term.months === Number(body.term_months),
+              )
+            : null;
+        if (invoice.payment_policy === "eligible" && !option)
+          fail(
+            400,
+            "Choose an eligible 3-month or 6-month plan for this invoice.",
+          );
+        if (option && body.accept_fee !== true)
+          fail(
+            400,
+            "Accept the displayed one-time plan fee before requesting this plan.",
+          );
+        const amount = option
+          ? option.monthly_amount
+          : cents(body.monthly_amount, "Monthly amount");
+        if (!option && amount > invoice.balance)
           fail(400, "Monthly amount cannot exceed the remaining balance.");
         const start = date(body.start_date, "first payment date");
         if (start < new Date().toISOString().slice(0, 10))
           fail(400, "Choose today or a future first payment date.");
+        if (
+          option &&
+          makeSchedule(start, option.months, option.scheduled_total).at(-1)
+            .due_date > "2100-12-31"
+        )
+          fail(400, "Choose an earlier first payment date.");
         const id = db
           .prepare(
-            "INSERT INTO plan_requests(invoice_id,customer_id,monthly_amount,start_date,message) VALUES(?,?,?,?,?)",
+            "INSERT INTO plan_requests(invoice_id,customer_id,monthly_amount,start_date,message,term_months,fee_bps,fee_amount,balance_at_request,scheduled_total) VALUES(?,?,?,?,?,?,?,?,?,?)",
           )
           .run(
             invoice.id,
@@ -420,11 +503,144 @@ export function buildServer(options = {}) {
             amount,
             start,
             text(body.message, "Message", 2000, true),
+            option?.months || 0,
+            option?.fee_bps || 0,
+            option?.fee_amount || 0,
+            invoice.balance,
+            option?.scheduled_total || 0,
           ).lastInsertRowid;
         json({ id: Number(id) }, 201);
         return;
       }
+      match = path.match(/^\/api\/invoices\/(\d+)\/payment-reports$/);
+      if (match && req.method === "POST") {
+        if (user.role !== "customer")
+          fail(403, "Only the customer can report a payment.");
+        const body = await readBody(req),
+          invoice = invoiceFor(Number(match[1]), user);
+        if (invoice.balance <= 0) fail(400, "This invoice is already paid.");
+        if (!["venmo", "zelle"].includes(body.method))
+          fail(400, "Choose Venmo or Zelle.");
+        if (body.attestation !== true)
+          fail(400, "Confirm you have actually sent this payment.");
+        const amount = cents(body.amount, "Amount", MAX_CENTS + 4_550_000),
+          tip = optionalCents(body.tip_amount, "Tip");
+        if (amount > invoice.balance)
+          fail(400, "Payment cannot exceed the remaining balance.");
+        const approved = db
+          .prepare(
+            "SELECT id FROM plan_requests WHERE invoice_id=? AND status='approved'",
+          )
+          .get(invoice.id);
+        if (amount !== invoice.balance && !approved)
+          fail(400, "Pay the full balance or request an eligible plan first.");
+        if (
+          db
+            .prepare(
+              "SELECT id FROM payment_reports WHERE invoice_id=? AND status='pending'",
+            )
+            .get(invoice.id)
+        )
+          fail(409, "Your payment notice is already awaiting verification.");
+        const id = transaction(db, () => {
+          const id = Number(
+            db
+              .prepare(
+                "INSERT INTO payment_reports(invoice_id,customer_id,method,amount,tip_amount,reference) VALUES(?,?,?,?,?,?)",
+              )
+              .run(
+                invoice.id,
+                user.id,
+                body.method,
+                amount,
+                tip,
+                text(body.reference, "Reference", 200, true),
+              ).lastInsertRowid,
+          );
+          notifications.paymentReport(
+            {
+              id,
+              method: body.method,
+              amount,
+              tip_amount: tip,
+              reference: body.reference,
+            },
+            invoice,
+          );
+          return id;
+        });
+        json({ id, status: "pending" }, 201);
+        return;
+      }
       if (user.role !== "admin") fail(403, "Administrator access is required.");
+      if (path === "/api/email-status" && req.method === "GET") {
+        json(notifications.status());
+        return;
+      }
+      match = path.match(/^\/api\/payment-reports\/(\d+)\/review$/);
+      if (match && req.method === "POST") {
+        const body = await readBody(req),
+          report = db
+            .prepare("SELECT * FROM payment_reports WHERE id=?")
+            .get(Number(match[1]));
+        if (!report) fail(404, "Payment notice not found.");
+        if (report.status !== "pending")
+          fail(409, "This payment notice has already been reviewed.");
+        if (!["confirmed", "rejected"].includes(body.status))
+          fail(400, "Choose confirm or reject.");
+        const note = text(body.admin_note, "Response", 2000, true);
+        const invoice = invoiceFor(report.invoice_id, user);
+        let paidDate;
+        if (body.status === "confirmed") {
+          if (body.verified !== true)
+            fail(
+              400,
+              "Verify the payment in your own account before confirming.",
+            );
+          paidDate = date(body.paid_date, "payment date");
+          if (paidDate > new Date().toISOString().slice(0, 10))
+            fail(400, "Payment date cannot be in the future.");
+          if (report.amount > invoice.balance)
+            fail(
+              409,
+              "The balance has changed. Reject this notice and record the actual payment separately.",
+            );
+        }
+        const receiptId = transaction(db, () => {
+          let paymentId = null,
+            receiptId = null;
+          if (body.status === "confirmed") {
+            paymentId = Number(
+              db
+                .prepare(
+                  "INSERT INTO payments(invoice_id,amount,paid_date,reference,recorded_by,tip_amount,method) VALUES(?,?,?,?,?,?,?)",
+                )
+                .run(
+                  invoice.id,
+                  report.amount,
+                  paidDate,
+                  report.reference,
+                  user.id,
+                  report.tip_amount,
+                  report.method,
+                ).lastInsertRowid,
+            );
+            receiptId = createReceipt(
+              db,
+              invoice,
+              { ...report, id: paymentId, paid_date: paidDate },
+              businessName,
+              notifications,
+            );
+          }
+          db.prepare(
+            "UPDATE payment_reports SET status=?,admin_note=?,reviewed_by=?,reviewed_at=datetime('now'),payment_id=? WHERE id=?",
+          ).run(body.status, note, user.id, paymentId, report.id);
+          return receiptId;
+        });
+        json({ ok: true, receipt_id: receiptId });
+        return;
+      }
       if (path === "/api/payment-settings" && req.method === "POST") {
         const body = await readBody(req, 3 * 1024 * 1024);
         json({ payment_settings: savePaymentSettings(db, body) });
@@ -522,12 +738,15 @@ export function buildServer(options = {}) {
           200,
           true,
         );
+        const policy = body.payment_policy ?? "eligible";
+        if (!["full", "eligible"].includes(policy))
+          fail(400, "Choose pay in full or eligible payment plans.");
         const id = transaction(db, () => {
           const today = new Date().toISOString().slice(0, 10);
           const id = Number(
             db
               .prepare(
-                "INSERT INTO invoices(customer_id,description,issued_date,due_date,notes,discount_amount,discount_label) VALUES(?,?,?,?,?,?,?)",
+                "INSERT INTO invoices(customer_id,description,issued_date,due_date,notes,discount_amount,discount_label,payment_policy) VALUES(?,?,?,?,?,?,?,?)",
               )
               .run(
                 body.customer_id,
@@ -537,6 +756,7 @@ export function buildServer(options = {}) {
                 notes,
                 discount,
                 discountLabel,
+                policy,
               ).lastInsertRowid,
           );
           db.prepare("UPDATE invoices SET number=? WHERE id=?").run(
@@ -556,7 +776,7 @@ export function buildServer(options = {}) {
       if (match && req.method === "POST") {
         const body = await readBody(req),
           invoice = invoiceFor(Number(match[1]), user);
-        const amount = cents(body.amount),
+        const amount = cents(body.amount, "Amount", MAX_CENTS + 4_550_000),
           paidDate = date(body.paid_date, "payment date");
         const tip = optionalCents(body.tip_amount, "Tip");
         const method = body.method ?? "other";
@@ -569,20 +789,53 @@ export function buildServer(options = {}) {
           fail(400, "Payment date cannot be in the future.");
         if (amount > invoice.balance)
           fail(400, "Payment cannot exceed the remaining balance.");
-        const id = db
-          .prepare(
-            "INSERT INTO payments(invoice_id,amount,paid_date,reference,recorded_by,tip_amount,method) VALUES(?,?,?,?,?,?,?)",
-          )
-          .run(
-            invoice.id,
-            amount,
-            paidDate,
-            text(body.reference, "Reference", 200, true),
-            user.id,
-            tip,
-            method,
-          ).lastInsertRowid;
-        json({ id: Number(id) }, 201);
+        if (invoice.payment_policy === "full" && amount !== invoice.balance)
+          fail(400, "This invoice requires payment in full.");
+        if (
+          db
+            .prepare(
+              "SELECT id FROM payment_reports WHERE invoice_id=? AND status='pending'",
+            )
+            .get(invoice.id)
+        )
+          fail(
+            409,
+            "Review the pending customer payment notice first to avoid recording the same money twice.",
+          );
+        const reference = text(body.reference, "Reference", 200, true);
+        const result = transaction(db, () => {
+          const id = Number(
+            db
+              .prepare(
+                "INSERT INTO payments(invoice_id,amount,paid_date,reference,recorded_by,tip_amount,method) VALUES(?,?,?,?,?,?,?)",
+              )
+              .run(
+                invoice.id,
+                amount,
+                paidDate,
+                reference,
+                user.id,
+                tip,
+                method,
+              ).lastInsertRowid,
+          );
+          const receiptId = createReceipt(
+            db,
+            invoice,
+            {
+              id,
+              amount,
+              tip_amount: tip,
+              method,
+              paid_date: paidDate,
+              reference,
+            },
+            businessName,
+            notifications,
+          );
+          return { id, receipt_id: receiptId };
+        });
+        json(result, 201);
         return;
       }
       match = path.match(/^\/api\/plans\/(\d+)\/review$/);
@@ -604,14 +857,51 @@ export function buildServer(options = {}) {
             400,
             "This invoice is already paid. Decline the request with an explanation.",
           );
-        db.prepare(
-          "UPDATE plan_requests SET status=?,admin_note=?,reviewed_by=?,reviewed_at=datetime('now') WHERE id=?",
-        ).run(
-          body.status,
-          text(body.admin_note, "Response", 2000, true),
-          user.id,
-          plan.id,
-        );
+        const invoice = invoiceFor(plan.invoice_id, user);
+        if (
+          body.status === "approved" &&
+          db
+            .prepare(
+              "SELECT id FROM payment_reports WHERE invoice_id=? AND status='pending'",
+            )
+            .get(invoice.id)
+        )
+          fail(
+            409,
+            "Review the pending payment notice before approving a plan.",
+          );
+        if (
+          body.status === "approved" &&
+          plan.term_months > 0 &&
+          (invoice.balance !== plan.balance_at_request ||
+            invoice.plan_fee !== 0 ||
+            invoice.payment_policy === "full")
+        )
+          fail(
+            409,
+            "The invoice balance has changed since this request. Decline it and ask the customer to request a new plan.",
+          );
+        const note = text(body.admin_note, "Response", 2000, true);
+        transaction(db, () => {
+          if (body.status === "approved" && plan.term_months > 0) {
+            db.prepare("UPDATE invoices SET plan_fee=? WHERE id=?").run(
+              plan.fee_amount,
+              invoice.id,
+            );
+            const insert = db.prepare(
+              "INSERT INTO installments(plan_id,sequence,due_date,amount) VALUES(?,?,?,?)",
+            );
+            for (const item of makeSchedule(
+              plan.start_date,
+              plan.term_months,
+              plan.scheduled_total,
+            ))
+              insert.run(plan.id, item.sequence, item.due_date, item.amount);
+          }
+          db.prepare(
+            "UPDATE plan_requests SET status=?,admin_note=?,reviewed_by=?,reviewed_at=datetime('now') WHERE id=?",
+          ).run(body.status, note, user.id, plan.id);
+        });
         json({ ok: true });
         return;
       }
@@ -632,8 +922,10 @@ export function buildServer(options = {}) {
   });
   server.requestTimeout = 30_000;
   server.headersTimeout = 15_000;
-  server.on("close", () => db.close());
-  return { server, db };
+  server.on("close", () => {
+    void notifications.stop().finally(() => db.close());
+  });
+  return { server, db, flushEmail: notifications.flush };
 }
 
 if (

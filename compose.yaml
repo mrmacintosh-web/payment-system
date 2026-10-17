@@ -6,6 +6,9 @@ services:
     environment:
       PUBLIC_ORIGIN: https://${DOMAIN:?Set DOMAIN in .env first}
       BUSINESS_NAME: "${BUSINESS_NAME:-The Office of Yash SR: Payment Portal}"
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
     volumes:
       - billing_data:/app/.data
     read_only: true
