@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "The Office of Yash SR: Payment Portal — invoices, customer accounts, and payment plans.",
+  "description": "The Office of Yash SR: Payment Portal - invoices, customer accounts, and payment plans.",
   "engines": {
     "node": ">=24.0.0"
   },

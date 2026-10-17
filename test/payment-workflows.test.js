@@ -691,7 +691,7 @@ test("customer declarations leave debt unchanged, require attestation, and admin
       method: "venmo",
       amount: "75.00",
       tip_amount: "5.00",
-      reference: "Alex — transaction 123",
+      reference: "Alex - transaction 123",
       attestation: true,
     };
     assert.equal(

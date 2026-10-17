@@ -89,18 +89,18 @@ The following events generate emails when delivery is configured:
 
 | Event                                       | Customer / account owner                                                                      | Administrator inbox                         |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------- |
-| Customer account created                    | Account ready, login address, password shared separately                                      | —                                           |
-| Invoice created                             | Invoice ready, discounted amount due, due date                                                | —                                           |
+| Customer account created                    | Account ready, login address, password shared separately                                      | -                                           |
+| Invoice created                             | Invoice ready, discounted amount due, due date                                                | -                                           |
 | Plan requested                              | Request received, pending review, quoted terms                                                | Request details and customer's note         |
-| Plan approved                               | Approved terms, one-time fee, exact schedule, administrator's note                            | —                                           |
-| Plan declined                               | Decision, administrator's note, current balance, next steps                                   | —                                           |
+| Plan approved                               | Approved terms, one-time fee, exact schedule, administrator's note                            | -                                           |
+| Plan declined                               | Decision, administrator's note, current balance, next steps                                   | -                                           |
 | Customer clicks “I paid” for Venmo/Zelle    | Notice received, pending review; balance unchanged                                            | Verify payment in your own account          |
-| Payment notice rejected                     | Could not verify, administrator's note, balance unchanged; contact office before paying again | —                                           |
+| Payment notice rejected                     | Could not verify, administrator's note, balance unchanged; contact office before paying again | -                                           |
 | Payment confirmed or manually recorded      | Thank-you receipt, invoice amount, tip, remaining balance                                     | Recorded payment summary and receipt number |
 | Weekly late fee assessed                    | Fee amount, assessment dates, updated balance, invoice link                                   | Fee summary and invoice link                |
 | Late fee waived                             | Amount removed, administrator's reason, updated balance                                       | Waiver summary and invoice link             |
-| Password changed in the app                 | Security notice to the account owner                                                          | —                                           |
-| Customer password reset by admin in the app | Security notice; get temporary password separately                                            | —                                           |
+| Password changed in the app                 | Security notice to the account owner                                                          | -                                           |
+| Customer password reset by admin in the app | Security notice; get temporary password separately                                            | -                                           |
 
 `ADMIN_EMAIL` overrides the recipient for all administrator billing notices. If unset, each administrator account receives them. Password security notices always go to the affected account owner. Approval and rejection actions show immediate confirmation in the administrator dashboard; they do not send an extra copy back to the reviewing administrator. Emails never include passwords or password-reset tokens. Temporary passwords must still be shared securely and separately. Command-line administrator password creation/recovery does not send email. Self-service password-reset links and automatic due/overdue reminders are not implemented.
 
