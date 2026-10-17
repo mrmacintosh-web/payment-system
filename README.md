@@ -94,6 +94,24 @@ Customers see the fee, total, and installments and must consent before submittin
 
 Pay-in-full invoices reject plan requests and partial payments on the server. For other invoices, an administrator can still record an actual partial payment received. Existing invoices and older custom plans retain their original behavior and balances; no new fee is added to old approvals. These new policy choices apply when creating new invoices.
 
+## Weekly late fees
+
+New invoices enable weekly late fees by default. The administrator can uncheck **Apply a weekly late fee of 2%** when creating an invoice. Existing invoices keep their original balances and no-fee policy.
+
+There are three full calendar days of grace after the due date. The first fee is added on **day 4 overdue**, followed by one fee every **7 days** while a purchase or scheduled installment remains overdue. For example, a $100 purchase due January 10 can receive a $2 fee January 14 and another $2 January 21. Dates use **America/New_York (Eastern Time)**, including daylight saving changes.
+
+Each fee is **2% of the full purchase after discounts**, rounded to the nearest cent with half cents rounded up. Tips, plan fees, and previous late fees are excluded. Partial payments do not change this fee base. Fees do not compound, and no further fee is generated once payments cover the purchase and its plan fee, even if a previously assessed late fee remains unpaid. Only one fee per invoice can be added in any seven-day period, even when several installments are overdue.
+
+Approved plans use their installment due dates and each installment's three-day grace period. Customers following an approved schedule are not charged based on the original invoice date. Catching up an installment stops that overdue streak. A pending plan request does not change the existing due date. Existing late fees are included in any subsequently requested plan's quote, separately from its one-time plan fee.
+
+The backend checks on startup, every minute, and before authenticated billing actions. SQLite stores the assessment dates and cursor, so restarts do not duplicate fees and missed weeks are assessed on return. No fee predates the new invoice's creation. Missed periods are grouped into one email per invoice per assessment run. Each fee appears as a dated charge in the invoice and is included in new receipt snapshots; historical receipts remain unchanged.
+
+While a Venmo/Zelle notice awaits review, new fee assessments pause. Confirmation uses the actual verified payment date and includes any applicable fee in the receipt. Timely payments do not acquire fees because of administrator review delays. Rejecting a notice resumes assessment for the genuinely overdue weeks. A fee only adds to the amount due; it does not withdraw money automatically.
+
+With email configured, customers receive **Late fee charged** emails with the amount, dates, balance, and portal link. Administrators receive copies in their configured billing inbox. Open an invoice as administrator and choose **Waive fee**, with a required reason, to remove an unpaid fee. The original assessment, waiver, administrator, and reason remain in its history; the customer receives a waiver email. If a fee was incorporated into an approved plan, its waiver credits the final unpaid installments. Review pending payment notices before waiving fees. A waiver cannot make an invoice balance negative; already-paid amounts require separate refund handling.
+
+Demo mode does not assess fees or send emails. An always-running production service and its persistent database disk are required; no separate cron service or new API key is needed.
+
 ## Receipts and payment verification
 
 Every newly recorded payment creates an immutable receipt, including the customer, itemized charges, discount, plan fee, payment method, invoice amount, tip, and balance **at the time of that payment**. Customers can open **Receipts** from the top menu or dashboard, then **Print / Save PDF**. Partial payments also receive receipts. Earlier receipts do not change when later payments are recorded. Historical payments are preserved without generating retroactive receipts or emails.

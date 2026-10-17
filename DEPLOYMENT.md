@@ -97,6 +97,8 @@ The following events generate emails when delivery is configured:
 | Customer clicks “I paid” for Venmo/Zelle    | Notice received, pending review; balance unchanged                                            | Verify payment in your own account          |
 | Payment notice rejected                     | Could not verify, administrator's note, balance unchanged; contact office before paying again | —                                           |
 | Payment confirmed or manually recorded      | Thank-you receipt, invoice amount, tip, remaining balance                                     | Recorded payment summary and receipt number |
+| Weekly late fee assessed                    | Fee amount, assessment dates, updated balance, invoice link                                   | Fee summary and invoice link                |
+| Late fee waived                             | Amount removed, administrator's reason, updated balance                                       | Waiver summary and invoice link             |
 | Password changed in the app                 | Security notice to the account owner                                                          | —                                           |
 | Customer password reset by admin in the app | Security notice; get temporary password separately                                            | —                                           |
 
@@ -105,6 +107,8 @@ The following events generate emails when delivery is configured:
 Email failures do not undo payments or dashboard receipts. Messages are stored in SQLite alongside their billing actions and retried with backoff and stable idempotency keys. After 12 failed attempts they remain pending for operator investigation. Fix provider settings before an operator resets affected pending rows' `attempts` and `next_attempt` to zero; do not reset sent rows. Only events occurring while delivery is configured are queued. Enabling email does not send historical notifications. Demo mode never queues or sends mail.
 
 ## 5. Verify and back up
+
+New invoices have a disclosed, optional weekly late-fee policy: 2% of the discounted purchase on day four overdue, then every seven days while overdue. Approved plans use installment dates. Existing invoices stay exempt. The app checks once per minute and on startup, with a durable SQLite assessment history; keep the paid Render instance running with the same persistent disk. No separate scheduled job is needed. Pending payment verification pauses assessments. Customers and the administrator inbox receive fee and waiver notices through the same Resend settings. See [late-fee rules and waivers](README.md#weekly-late-fees) for exact calculation and review behavior.
 
 Test the root redirect, customer and administrator sign-ins, customer password change, customer isolation, invoice plans, a Venmo/Zelle notice, administrator verification, dashboard receipt, and email. Sign-out should return to the login page and require a new sign-in. Add real customer information only after checking these workflows.
 

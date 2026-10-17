@@ -8,6 +8,8 @@ import { createCsrfProtection } from "./lib/csrf.js";
 import { configureSites, handlePortalAuth } from "./lib/portal-sites.js";
 import { planOptions, makeSchedule, presentPlan } from "./lib/plans.js";
 import { createNotifications } from "./lib/notifications.js";
+import { createLateFees } from "./lib/late-fees.js";
+import { billingDate, BILLING_TIME_ZONE } from "./lib/billing-dates.js";
 import { createReceipt, listReceipts } from "./lib/receipts.js";
 import {
   getPaymentSettings,
@@ -77,13 +79,13 @@ const date = (value, label) => {
   return value;
 };
 const cents = (value, label = "Amount", maximum = MAX_CENTS) => {
-  if (typeof value !== "string" || !/^\d{1,7}(\.\d{1,2})?$/.test(value))
+  if (typeof value !== "string" || !/^\d{1,12}(\.\d{1,2})?$/.test(value))
     fail(
       400,
       `${label} must be a positive amount with up to two decimal places.`,
     );
   const result = Math.round(Number(value) * 100);
-  if (result < 1 || result > maximum)
+  if (!Number.isSafeInteger(result) || result < 1 || result > maximum)
     fail(
       400,
       `${label} must be between $0.01 and $${(maximum / 100).toLocaleString("en-US")}.`,
@@ -169,6 +171,9 @@ export function buildServer(options = {}) {
     businessName,
     mail: options.mail,
   });
+  const now = options.now ?? (() => new Date());
+  const billingDay = () => billingDate(now());
+  const lateFees = createLateFees(db, { notifications, now, demo });
   const dummyHash = hashPassword(randomBytes(24).toString("hex"));
   const cookieName = production ? "__Host-ledger_session" : "ledger_session";
   const cookie = (token, age) =>
@@ -180,7 +185,7 @@ export function buildServer(options = {}) {
       )
       .get(...(user.role === "customer" ? [id, user.id] : [id]));
     if (!row) fail(404, "Invoice not found.");
-    return presentInvoice(row);
+    return presentInvoice(row, billingDay());
   };
   const sessionFor = (req) => {
     const token = (req.headers.cookie || "")
@@ -283,6 +288,7 @@ export function buildServer(options = {}) {
           business_name: businessName,
           demo,
           currency: "USD",
+          billing_time_zone: BILLING_TIME_ZONE,
           ...(sites ? { login_url: sites.login, portal_role: site.role } : {}),
           ...(csrf ? { csrf_token: csrf.issue(req, res) } : {}),
         });
@@ -403,6 +409,7 @@ export function buildServer(options = {}) {
       }
       if (user.must_change_password)
         fail(403, "Change your temporary password before continuing.");
+      lateFees.run();
       if (path === "/api/receipts" && req.method === "GET") {
         json({ receipts: listReceipts(db, user) });
         return;
@@ -432,7 +439,9 @@ export function buildServer(options = {}) {
                   `${invoiceQuery} WHERE i.customer_id=? ORDER BY i.id DESC`,
                 )
                 .all(user.id);
-        json({ invoices: rows.map(presentInvoice) });
+        json({
+          invoices: rows.map((row) => presentInvoice(row, billingDay())),
+        });
         return;
       }
       let match = path.match(/^\/api\/invoices\/(\d+)$/);
@@ -440,6 +449,11 @@ export function buildServer(options = {}) {
         const invoice = invoiceFor(Number(match[1]), user);
         json({
           invoice,
+          late_fees: db
+            .prepare(
+              "SELECT * FROM late_fees WHERE invoice_id=? ORDER BY assessed_date,id",
+            )
+            .all(invoice.id),
           items: db
             .prepare("SELECT * FROM line_items WHERE invoice_id=? ORDER BY id")
             .all(invoice.id),
@@ -540,7 +554,7 @@ export function buildServer(options = {}) {
         if (!option && amount > invoice.balance)
           fail(400, "Monthly amount cannot exceed the remaining balance.");
         const start = date(body.start_date, "first payment date");
-        if (start < new Date().toISOString().slice(0, 10))
+        if (start < billingDay())
           fail(400, "Choose today or a future first payment date.");
         if (
           option &&
@@ -553,7 +567,7 @@ export function buildServer(options = {}) {
           const id = Number(
             db
               .prepare(
-                "INSERT INTO plan_requests(invoice_id,customer_id,monthly_amount,start_date,message,term_months,fee_bps,fee_amount,balance_at_request,scheduled_total) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO plan_requests(invoice_id,customer_id,monthly_amount,start_date,message,term_months,fee_bps,fee_amount,balance_at_request,scheduled_total,paid_at_request) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
               )
               .run(
                 invoice.id,
@@ -566,12 +580,16 @@ export function buildServer(options = {}) {
                 option?.fee_amount || 0,
                 invoice.balance,
                 option?.scheduled_total || 0,
+                invoice.paid,
               ).lastInsertRowid,
           );
           notifications.planRequested(
             db.prepare("SELECT * FROM plan_requests WHERE id=?").get(id),
             invoice,
           );
+          db.prepare(
+            "INSERT INTO plan_late_fees(plan_id,fee_id) SELECT ?,id FROM late_fees WHERE invoice_id=? AND waived_at IS NULL",
+          ).run(id, invoice.id);
           return id;
         });
         json({ id }, 201);
@@ -588,7 +606,11 @@ export function buildServer(options = {}) {
           fail(400, "Choose Venmo or Zelle.");
         if (body.attestation !== true)
           fail(400, "Confirm you have actually sent this payment.");
-        const amount = cents(body.amount, "Amount", MAX_CENTS + 4_550_000),
+        const amount = cents(
+            body.amount,
+            "Amount",
+            Math.max(MAX_CENTS + 4_550_000, invoice.balance),
+          ),
           tip = optionalCents(body.tip_amount, "Tip");
         if (amount > invoice.balance)
           fail(400, "Payment cannot exceed the remaining balance.");
@@ -666,7 +688,7 @@ export function buildServer(options = {}) {
               "Verify the payment in your own account before confirming.",
             );
           paidDate = date(body.paid_date, "payment date");
-          if (paidDate > new Date().toISOString().slice(0, 10))
+          if (paidDate > billingDay())
             fail(400, "Payment date cannot be in the future.");
           if (report.amount > invoice.balance)
             fail(
@@ -693,17 +715,28 @@ export function buildServer(options = {}) {
                   report.method,
                 ).lastInsertRowid,
             );
+          }
+          db.prepare(
+            "UPDATE payment_reports SET status=?,admin_note=?,reviewed_by=?,reviewed_at=?,payment_id=? WHERE id=?",
+          ).run(
+            body.status,
+            note,
+            user.id,
+            now().toISOString(),
+            paymentId,
+            report.id,
+          );
+          if (body.status === "confirmed") {
+            lateFees.run({ insideTransaction: true, invoiceId: invoice.id });
+            const settled = invoiceFor(invoice.id, user);
             receiptId = createReceipt(
               db,
-              invoice,
+              { ...settled, balance: settled.balance + report.amount },
               { ...report, id: paymentId, paid_date: paidDate },
               businessName,
               notifications,
             );
           }
-          db.prepare(
-            "UPDATE payment_reports SET status=?,admin_note=?,reviewed_by=?,reviewed_at=datetime('now'),payment_id=? WHERE id=?",
-          ).run(body.status, note, user.id, paymentId, report.id);
           if (body.status === "rejected")
             notifications.paymentRejected(report, invoice, note);
           return receiptId;
@@ -714,6 +747,38 @@ export function buildServer(options = {}) {
       if (path === "/api/payment-settings" && req.method === "POST") {
         const body = await readBody(req, 3 * 1024 * 1024);
         json({ payment_settings: savePaymentSettings(db, body) });
+        return;
+      }
+      match = path.match(/^\/api\/late-fees\/(\d+)\/waive$/);
+      if (match && req.method === "POST") {
+        const body = await readBody(req);
+        const fee = db
+          .prepare("SELECT * FROM late_fees WHERE id=?")
+          .get(Number(match[1]));
+        if (!fee) fail(404, "Late fee not found.");
+        if (fee.waived_at) fail(409, "This fee has already been waived.");
+        const note = text(body.note, "Reason for waiving the fee", 2000);
+        const invoice = invoiceFor(fee.invoice_id, user);
+        if (invoice.balance < fee.amount)
+          fail(
+            400,
+            "This fee has already been paid in part or in full. A refund needs separate handling.",
+          );
+        if (
+          db
+            .prepare(
+              "SELECT id FROM payment_reports WHERE invoice_id=? AND status='pending'",
+            )
+            .get(invoice.id)
+        )
+          fail(409, "Review the pending payment notice before waiving a fee.");
+        transaction(db, () => {
+          db.prepare(
+            "UPDATE late_fees SET waived_at=?,waived_by=?,waiver_note=? WHERE id=?",
+          ).run(now().toISOString(), user.id, note, fee.id);
+          notifications.lateFeeWaived(fee, invoiceFor(invoice.id, user), note);
+        });
+        json({ ok: true, invoice_id: invoice.id });
         return;
       }
       if (path === "/api/customers" && req.method === "GET") {
@@ -822,12 +887,17 @@ export function buildServer(options = {}) {
         const policy = body.payment_policy ?? "eligible";
         if (!["full", "eligible"].includes(policy))
           fail(400, "Choose pay in full or eligible payment plans.");
+        if (
+          body.late_fee_enabled !== undefined &&
+          typeof body.late_fee_enabled !== "boolean"
+        )
+          fail(400, "Choose whether weekly late fees apply.");
         const id = transaction(db, () => {
-          const today = new Date().toISOString().slice(0, 10);
+          const today = billingDay();
           const id = Number(
             db
               .prepare(
-                "INSERT INTO invoices(customer_id,description,issued_date,due_date,notes,discount_amount,discount_label,payment_policy) VALUES(?,?,?,?,?,?,?,?)",
+                "INSERT INTO invoices(customer_id,description,issued_date,due_date,notes,discount_amount,discount_label,payment_policy,late_fee_policy,late_fee_start_date) VALUES(?,?,?,?,?,?,?,?,?,?)",
               )
               .run(
                 body.customer_id,
@@ -838,6 +908,8 @@ export function buildServer(options = {}) {
                 discount,
                 discountLabel,
                 policy,
+                body.late_fee_enabled === false ? "none" : "weekly_2_percent",
+                today,
               ).lastInsertRowid,
           );
           db.prepare("UPDATE invoices SET number=? WHERE id=?").run(
@@ -858,7 +930,11 @@ export function buildServer(options = {}) {
       if (match && req.method === "POST") {
         const body = await readBody(req),
           invoice = invoiceFor(Number(match[1]), user);
-        const amount = cents(body.amount, "Amount", MAX_CENTS + 4_550_000),
+        const amount = cents(
+            body.amount,
+            "Amount",
+            Math.max(MAX_CENTS + 4_550_000, invoice.balance),
+          ),
           paidDate = date(body.paid_date, "payment date");
         const tip = optionalCents(body.tip_amount, "Tip");
         const method = body.method ?? "other";
@@ -867,7 +943,7 @@ export function buildServer(options = {}) {
             400,
             "Choose cash, Venmo, Zelle, or other as the payment method.",
           );
-        if (paidDate > new Date().toISOString().slice(0, 10))
+        if (paidDate > billingDay())
           fail(400, "Payment date cannot be in the future.");
         if (amount > invoice.balance)
           fail(400, "Payment cannot exceed the remaining balance.");
@@ -981,8 +1057,8 @@ export function buildServer(options = {}) {
               insert.run(plan.id, item.sequence, item.due_date, item.amount);
           }
           db.prepare(
-            "UPDATE plan_requests SET status=?,admin_note=?,reviewed_by=?,reviewed_at=datetime('now') WHERE id=?",
-          ).run(body.status, note, user.id, plan.id);
+            "UPDATE plan_requests SET status=?,admin_note=?,reviewed_by=?,reviewed_at=? WHERE id=?",
+          ).run(body.status, note, user.id, now().toISOString(), plan.id);
           const reviewedInvoice = invoiceFor(invoice.id, user);
           notifications.planReviewed(
             presentPlan(
@@ -1013,10 +1089,26 @@ export function buildServer(options = {}) {
   });
   server.requestTimeout = 30_000;
   server.headersTimeout = 15_000;
+  const assessLateFees = () => {
+    try {
+      lateFees.run();
+    } catch (error) {
+      console.error("Late-fee assessment failed:", error.message);
+    }
+  };
+  server.once("listening", assessLateFees);
+  const lateFeeTimer = setInterval(assessLateFees, 60_000);
+  lateFeeTimer.unref();
   server.on("close", () => {
+    clearInterval(lateFeeTimer);
     void notifications.stop().finally(() => db.close());
   });
-  return { server, db, flushEmail: notifications.flush };
+  return {
+    server,
+    db,
+    flushEmail: notifications.flush,
+    assessLateFees: lateFees.run,
+  };
 }
 
 if (

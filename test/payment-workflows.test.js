@@ -1,3 +1,4 @@
+import { billingDate } from "../lib/billing-dates.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
@@ -6,7 +7,7 @@ import { hashPassword } from "../lib/database.js";
 import { makeSchedule } from "../lib/plans.js";
 
 const password = "WorkflowTests2026!";
-const today = new Date().toISOString().slice(0, 10);
+const today = billingDate();
 const future = `${new Date().getUTCFullYear() + 1}-01-31`;
 async function fixture(options = {}) {
   const sent = [];

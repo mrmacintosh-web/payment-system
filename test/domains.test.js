@@ -1,3 +1,4 @@
+import { billingDate } from "../lib/billing-dates.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
@@ -501,7 +502,7 @@ test("receipt email links use the customer domain and payment notices use the ad
             body: {
               status: "confirmed",
               verified: true,
-              paid_date: new Date().toISOString().slice(0, 10),
+              paid_date: billingDate(),
             },
           },
         )

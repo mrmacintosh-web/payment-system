@@ -1,3 +1,4 @@
+import { billingDate } from "../lib/billing-dates.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
@@ -18,7 +19,7 @@ import {
 } from "../lib/payment-settings.js";
 
 const password = "CommerceTest2026!";
-const today = new Date().toISOString().slice(0, 10);
+const today = billingDate();
 const png =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZl8AAAAASUVORK5CYII=";
 async function fixture() {

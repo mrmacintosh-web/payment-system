@@ -1,3 +1,4 @@
+import { billingDate } from "../lib/billing-dates.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
@@ -11,7 +12,7 @@ import { buildServer } from "../server.js";
 import { hashPassword } from "../lib/database.js";
 
 const pass = "TestPassword2026!";
-const today = new Date().toISOString().slice(0, 10);
+const today = billingDate();
 const future = new Date(Date.now() + 86400000 * 10).toISOString().slice(0, 10);
 async function fixture() {
   const dir = mkdtempSync(join(tmpdir(), "clearledger-test-"));
