@@ -11,6 +11,8 @@ const state = {
   filter: "all",
   search: "",
   invoice: null,
+  checkout: null,
+  paymentSettings: null,
 };
 const escape = (value) =>
   String(value ?? "").replace(
@@ -172,7 +174,7 @@ function renderPage() {
     return `${heading("KEEP EVERY DETAIL IN SIGHT", "Invoices", isAdmin() ? "Create invoices, track balances, and keep things moving." : "A clear view of what’s due, what’s paid, and everything in between.", isAdmin() ? createButton() : "")}<section class="panel">${invoiceToolbar()}<div id="invoice-results">${invoiceTable(state.invoices)}</div></section><p class="table-footnote">All amounts are in USD. Select an invoice to see its individual charges.</p>`;
   if (state.view === "customers") return customersPage();
   if (state.view === "plans") return plansPage();
-  return `${heading("MAKE YOURSELF AT HOME", "Account settings", "Your details and sign-in security.")}<section class="panel account-panel"><div class="profile-large"><span class="avatar">${escape(initial(state.user.full_name))}</span><div><h2>${escape(state.user.full_name)}</h2><p class="muted">${escape(state.user.email)}</p></div></div><dl class="account-details"><div><dt>Account type</dt><dd>${isAdmin() ? "Administrator" : "Customer"}</dd></div><div><dt>Email address</dt><dd>${escape(state.user.email)}</dd></div></dl><div class="account-security"><div><h3>Password & security</h3><p class="muted">Choose a unique password with at least 12 characters.</p></div><button class="button secondary" data-action="change-password">Change password</button></div><div class="account-signout"><button class="text-button" data-action="logout">${icon("logout")} Sign out of your account</button></div></section>`;
+  return `${heading("MAKE YOURSELF AT HOME", "Account settings", "Your details and sign-in security.")}<section class="panel account-panel"><div class="profile-large"><span class="avatar">${escape(initial(state.user.full_name))}</span><div><h2>${escape(state.user.full_name)}</h2><p class="muted">${escape(state.user.email)}</p></div></div><dl class="account-details"><div><dt>Account type</dt><dd>${isAdmin() ? "Administrator" : "Customer"}</dd></div><div><dt>Email address</dt><dd>${escape(state.user.email)}</dd></div></dl><div class="account-security"><div><h3>Password & security</h3><p class="muted">Choose a unique password with at least 12 characters.</p></div><button class="button secondary" data-action="change-password">Change password</button></div><div class="account-signout"><button class="text-button" data-action="logout">${icon("logout")} Sign out of your account</button></div></section>${isAdmin() ? `<section class="panel account-panel payment-settings-panel"><span class="eyebrow">HOW CUSTOMERS CAN PAY</span><h2>Payment methods</h2><p class="muted">Add cash instructions, your Venmo username, your Zelle number, and QR codes. You can update these at any time.</p><button class="button secondary" data-action="payment-settings">Manage payment methods ${icon("arrow")}</button></section>` : ""}`;
 }
 function customerOverview() {
   const outstanding = state.invoices.reduce(
@@ -192,7 +194,7 @@ function overview() {
     (invoice) => invoice.status === "overdue",
   );
   const collected = state.invoices.reduce(
-    (sum, invoice) => sum + invoice.paid,
+    (sum, invoice) => sum + invoice.paid + (invoice.tips_received || 0),
     0,
   );
   const pending = state.plans.filter((plan) => plan.status === "pending");
@@ -277,6 +279,7 @@ function showModal(title, content, wide = false) {
   modal.innerHTML = `<div class="modal-header"><h2 id="modal-title">${title}</h2><button class="icon-button" data-action="close-modal" aria-label="Close dialog">${icon("close")}</button></div>${content}`;
   modal.className = wide ? "wide" : "";
   if (!modal.open) modal.showModal();
+  modal.scrollTop = 0;
 }
 modal.addEventListener("close", () => {
   if (returnFocus?.isConnected) returnFocus.focus();
@@ -303,7 +306,7 @@ async function openInvoice(id) {
   const active = plans.find((p) => ["pending", "approved"].includes(p.status));
   showModal(
     "Invoice details",
-    `<div class="invoice-detail"><div class="invoice-paper-header"><div><div class="paper-brand"><img src="/brand/office-logo.png" class="invoice-logo" alt="The Office of Yash Sunder Raj logo" width="180" height="75"><span>${escape(state.config.business_name)}</span></div><h3>${escape(i.number)}</h3><p>${escape(i.description)}</p></div>${badge(i.status)}</div><div class="invoice-meta"><div><span>BILLED TO</span><strong>${escape(i.customer_name)}</strong><p>${escape(i.customer_email)}</p></div><div><span>ISSUED</span><strong>${day(i.issued_date)}</strong><span class="due-label">DUE DATE</span><strong>${day(i.due_date)}</strong></div></div><div class="table-scroll"><table class="line-table"><thead><tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th></tr></thead><tbody>${items.map((item) => `<tr><td>${escape(item.description)}</td><td>${item.quantity}</td><td>${money(item.unit_amount)}</td><td>${money(item.quantity * item.unit_amount)}</td></tr>`).join("")}</tbody></table></div><div class="invoice-totals"><div><span>Invoice total</span><strong>${money(i.total)}</strong></div><div><span>Payments received</span><strong>−${money(i.paid)}</strong></div><div class="total-due"><span>Balance due</span><strong>${money(i.balance)}</strong></div></div>${i.notes ? `<div class="invoice-notes"><strong>A note for you</strong><p>${escape(i.notes)}</p></div>` : ""}${payments.length ? `<section class="detail-section"><h3>Payment history</h3>${payments.map((p) => `<div class="payment-row"><span class="payment-check">${icon("check")}</span><div><strong>${escape(p.reference || "Payment received")}</strong><small>${day(p.paid_date)}</small></div><b>${money(p.amount)}</b></div>`).join("")}</section>` : ""}${active ? `<div class="invoice-plan-note">${icon("plan")}<div><strong>${active.status === "pending" ? "Payment plan requested" : "Payment plan approved"}</strong><p>${money(active.monthly_amount)} / month · First payment ${day(active.start_date)}</p>${active.admin_note ? `<p>${escape(active.admin_note)}</p>` : ""}</div></div>` : ""}</div><div class="invoice-dialog-footer"><button class="button secondary" data-action="print-invoice">${icon("print")} Print / Save PDF</button>${i.balance > 0 ? (isAdmin() ? `<button class="button primary" data-action="record-payment" data-id="${i.id}">${icon("plus")} Record payment</button>` : !active ? `<button class="button primary" data-action="request-plan" data-id="${i.id}">${icon("plan")} Request payment plan</button>` : "") : '<span class="paid-message">' + icon("check") + " Paid in full. Thank you.</span>"}</div>`,
+    `<div class="invoice-detail"><div class="invoice-paper-header"><div><div class="paper-brand"><img src="/brand/office-logo.png" class="invoice-logo" alt="The Office of Yash Sunder Raj logo" width="180" height="75"><span>${escape(state.config.business_name)}</span></div><h3>${escape(i.number)}</h3><p>${escape(i.description)}</p></div>${badge(i.status)}</div><div class="invoice-meta"><div><span>BILLED TO</span><strong>${escape(i.customer_name)}</strong><p>${escape(i.customer_email)}</p></div><div><span>ISSUED</span><strong>${day(i.issued_date)}</strong><span class="due-label">DUE DATE</span><strong>${day(i.due_date)}</strong></div></div><div class="table-scroll"><table class="line-table"><thead><tr><th>Description</th><th>Qty</th><th>Unit price</th><th>Amount</th></tr></thead><tbody>${items.map((item) => `<tr><td>${escape(item.description)}</td><td>${item.quantity}</td><td>${money(item.unit_amount)}</td><td>${money(item.quantity * item.unit_amount)}</td></tr>`).join("")}</tbody></table></div><div class="invoice-totals">${i.discount_amount > 0 ? `<div><span>Charges subtotal</span><strong>${money(i.subtotal)}</strong></div><div class="discount-row"><span>${escape(i.discount_label || "Sale / discount")}</span><strong>−${money(i.discount_amount)}</strong></div>` : ""}<div><span>Invoice total</span><strong>${money(i.total)}</strong></div><div><span>Applied to invoice</span><strong>−${money(i.paid)}</strong></div><div class="total-due"><span>Balance due</span><strong>${money(i.balance)}</strong></div></div>${i.notes ? `<div class="invoice-notes"><strong>A note for you</strong><p>${escape(i.notes)}</p></div>` : ""}${payments.length ? `<section class="detail-section"><h3>Payment history</h3>${payments.map((p) => `<div class="payment-row"><span class="payment-check">${icon("check")}</span><div><strong>${escape(p.reference || "Payment received")}</strong><small>${day(p.paid_date)} · ${paymentMethodName(p.method)}</small>${p.tip_amount > 0 ? `<small>${money(p.amount)} toward invoice · ${money(p.tip_amount)} tip</small>` : ""}</div><b>${money(p.amount + (p.tip_amount || 0))}</b></div>`).join("")}</section>` : ""}${active ? `<div class="invoice-plan-note">${icon("plan")}<div><strong>${active.status === "pending" ? "Payment plan requested" : "Payment plan approved"}</strong><p>${money(active.monthly_amount)} / month · First payment ${day(active.start_date)}</p>${active.admin_note ? `<p>${escape(active.admin_note)}</p>` : ""}</div></div>` : ""}</div><div class="invoice-dialog-footer"><button class="button secondary" data-action="print-invoice">${icon("print")} Print / Save PDF</button>${i.balance > 0 ? (isAdmin() ? `<button class="button primary" data-action="record-payment" data-id="${i.id}">${icon("plus")} Record payment</button>` : `<div class="invoice-customer-actions"><button class="button primary" data-action="pay-invoice" data-id="${i.id}">Make a payment ${icon("arrow")}</button>${!active ? `<button class="button secondary" data-action="request-plan" data-id="${i.id}">${icon("plan")} Request payment plan</button>` : ""}</div>`) : '<span class="paid-message">' + icon("check") + " Paid in full. Thank you.</span>"}</div>`,
     true,
   );
 }
@@ -325,7 +328,7 @@ function newInvoice() {
   const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
   showModal(
     "Create an invoice",
-    `<form id="invoice-form" class="modal-form"><p class="muted">A clear description for every charge. All amounts are in USD.</p><div class="form-grid"><label>Customer<select name="customer_id" required><option value="">Select a customer</option>${state.customers.map((c) => `<option value="${c.id}">${escape(c.full_name)} · ${escape(c.email)}</option>`).join("")}</select></label><label>Due date<input type="date" name="due_date" min="2000-01-01" max="2100-12-31" value="${due}" required></label></div><label>Invoice title<input name="description" maxlength="160" placeholder="e.g. Website design & development" required></label><div class="line-items-editor"><div class="line-items-labels"><span>Individual charges</span><span>Qty</span><span>Unit price ($)</span><span></span></div><div id="invoice-items">${itemRow()}</div><button type="button" class="text-button" data-action="add-item">${icon("plus")} Add a charge</button></div><div class="invoice-form-total"><span>Invoice total</span><strong id="invoice-form-total">$0.00</strong></div><label>Note to customer <span class="optional">(optional)</span><textarea name="notes" maxlength="2000" rows="3" placeholder="Payment instructions, a thank-you, or any helpful details."></textarea></label>${formEnd("Create invoice")}</form>`,
+    `<form id="invoice-form" class="modal-form"><p class="muted">A clear description for every charge. All amounts are in USD.</p><div class="form-grid"><label>Customer<select name="customer_id" required><option value="">Select a customer</option>${state.customers.map((c) => `<option value="${c.id}">${escape(c.full_name)} · ${escape(c.email)}</option>`).join("")}</select></label><label>Due date<input type="date" name="due_date" min="2000-01-01" max="2100-12-31" value="${due}" required></label></div><label>Invoice title<input name="description" maxlength="160" placeholder="e.g. Website design & development" required></label><div class="line-items-editor"><div class="line-items-labels"><span>Individual charges</span><span>Qty</span><span>Unit price ($)</span><span></span></div><div id="invoice-items">${itemRow()}</div><button type="button" class="text-button" data-action="add-item">${icon("plus")} Add a charge</button></div><div class="invoice-discount"><span class="eyebrow">SALE / DISCOUNT</span><div class="form-grid"><label>Discount amount ($)<input name="discount_amount" type="number" min="0" max="1000000" step="0.01" value="0.00"></label><label>Discount label <span class="optional">(optional)</span><input name="discount_label" maxlength="200" placeholder="e.g. Holiday sale"></label></div><p class="field-hint">A dollar amount to subtract from the charges. Leave it at zero for no discount.</p></div><div class="invoice-form-total"><span>Invoice total</span><strong id="invoice-form-total">$0.00</strong></div><label>Note to customer <span class="optional">(optional)</span><textarea name="notes" maxlength="2000" rows="3" placeholder="Payment instructions, a thank-you, or any helpful details."></textarea></label>${formEnd("Create invoice")}</form>`,
     true,
   );
 }
@@ -340,9 +343,123 @@ function recordPayment() {
   const i = state.invoice.invoice;
   showModal(
     "Record a payment",
-    `<form id="payment-form" class="modal-form" data-id="${i.id}"><p class="muted">Record money already received for ${escape(i.number)}. This does not charge a card or transfer money.</p><div class="form-balance"><span>Remaining balance</span><strong>${money(i.balance)}</strong></div><div class="form-grid"><label>Amount received ($)<input name="amount" type="number" min="0.01" max="${(i.balance / 100).toFixed(2)}" step="0.01" required></label><label>Payment date<input name="paid_date" type="date" min="2000-01-01" max="${today()}" value="${today()}" required></label></div><label>Payment reference <span class="optional">(optional)</span><input name="reference" maxlength="200" placeholder="e.g. Bank transfer #1234"></label>${formEnd("Record payment")}</form>`,
+    `<form id="payment-form" class="modal-form" data-id="${i.id}"><p class="muted">Record money already received for ${escape(i.number)}. This does not charge a card or transfer money.</p><div class="form-balance"><span>Remaining balance</span><strong>${money(i.balance)}</strong></div><div class="form-grid"><label>Amount toward invoice ($)<input name="amount" type="number" min="0.01" max="${(i.balance / 100).toFixed(2)}" step="0.01" required></label><label>Payment date<input name="paid_date" type="date" min="2000-01-01" max="${today()}" value="${today()}" required></label></div><div class="form-grid payment-record-extras"><label>Tip received ($)<input name="tip_amount" type="number" min="0" max="1000000" step="0.01" value="0.00"></label><label>Payment method<select name="method"><option value="other">Other / bank transfer</option><option value="cash">Cash</option><option value="venmo">Venmo</option><option value="zelle">Zelle</option></select></label></div><p class="field-hint">The invoice payment excludes any tip. Record any tip separately.</p><label>Payment reference <span class="optional">(optional)</span><input name="reference" maxlength="200" placeholder="e.g. Bank transfer #1234"></label>${formEnd("Record payment")}</form>`,
   );
 }
+const paymentMethodName = (method) =>
+  ({ cash: "Cash", venmo: "Venmo", zelle: "Zelle", other: "Other" })[method] ||
+  "Other";
+const qrPreview = (value, method) =>
+  value
+    ? `<img class="payment-qr" src="${escape(value)}" alt="${paymentMethodName(method)} payment QR code">`
+    : `<div class="qr-placeholder">${icon("invoice")}<span>${paymentMethodName(method)} QR code not added yet</span></div>`;
+
+async function openPayment(id) {
+  const [details, settings] = await Promise.all([
+    api(`/invoices/${id}`),
+    api("/payment-settings"),
+  ]);
+  state.invoice = details;
+  if (details.invoice.balance <= 0) {
+    toast("This invoice is already paid.");
+    await openInvoice(id);
+    return;
+  }
+  state.checkout = {
+    invoice: details.invoice,
+    settings: settings.payment_settings,
+    method: "cash",
+  };
+  showModal(
+    "Make a payment",
+    `<div class="payment-flow"><p class="muted">${escape(details.invoice.number)} · ${escape(details.invoice.description)}</p><div class="checkout-amounts"><div><span>Invoice balance</span><strong>${money(details.invoice.balance)}</strong></div><div><span>Optional tip</span><strong id="checkout-tip-summary">$0.00</strong></div><div class="checkout-total"><span>Total to pay</span><strong id="checkout-total">${money(details.invoice.balance)}</strong></div></div><section class="tip-section"><h3>Add a tip <span class="optional">(optional)</span></h3><div class="tip-presets" aria-label="Tip amount">${[
+      ["0.00", "No tip"],
+      ["5.00", "+$5"],
+      ["10.00", "+$10"],
+      ["20.00", "+$20"],
+    ]
+      .map(
+        ([amount, label]) =>
+          `<button class="tip-preset ${amount === "0.00" ? "active" : ""}" data-action="tip-preset" data-amount="${amount}" aria-pressed="${amount === "0.00"}">${label}</button>`,
+      )
+      .join(
+        "",
+      )}</div><label class="tip-custom">Tip amount ($)<input id="checkout-tip" type="number" min="0" max="1000000" step="0.01" value="0.00"></label></section><section class="payment-method-section"><h3>How would you like to pay?</h3><div class="payment-method-tabs" aria-label="Payment method">${["cash", "venmo", "zelle"].map((method) => `<button class="payment-method ${method === "cash" ? "active" : ""}" data-action="payment-method" data-method="${method}" aria-pressed="${method === "cash"}">${paymentMethodName(method)}</button>`).join("")}</div><div id="payment-instructions" aria-live="polite"></div></section><p class="field-hint">Choosing a method or tip does not send money or mark your invoice paid. Your balance updates after the administrator records the payment.</p><div class="modal-actions"><button class="button secondary" data-action="invoice" data-id="${id}">Back to invoice</button></div></div>`,
+    true,
+  );
+  updateCheckout();
+}
+
+function updateCheckout() {
+  const checkout = state.checkout,
+    input = $("#checkout-tip");
+  if (!checkout || !input) return;
+  const value = input.value || "0";
+  const valid =
+    /^\d{1,7}(?:\.\d{1,2})?$/.test(value) &&
+    Number(value) >= 0 &&
+    Number(value) <= 1000000;
+  if (!valid) {
+    $("#checkout-total").textContent = "—";
+    $("#payment-instructions").innerHTML =
+      '<p class="form-error" role="alert">Enter a tip between $0 and $1,000,000 with up to two decimal places.</p>';
+    return;
+  }
+  const tip = Math.round(Number(value) * 100),
+    total = checkout.invoice.balance + tip;
+  $("#checkout-tip-summary").textContent = money(tip);
+  $("#checkout-total").textContent = money(total);
+  $$(".tip-preset").forEach((button) => {
+    const active = Number(button.dataset.amount) === Number(value);
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  $$(".payment-method").forEach((button) => {
+    const active = button.dataset.method === checkout.method;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  const settings = checkout.settings,
+    method = checkout.method;
+  if (method === "cash") {
+    $("#payment-instructions").innerHTML =
+      `<div class="payment-instruction-card"><span class="eyebrow">CASH PAYMENT</span><h3>Pay ${money(total)} in person.</h3><p>${escape(settings.cash_instructions || "Please arrange an in-person payment with The Office of Yash SR.")}</p><p class="payment-reference">Invoice reference: <strong>${escape(checkout.invoice.number)}</strong></p></div>`;
+    return;
+  }
+  const recipient =
+    method === "venmo" ? settings.venmo_username : settings.zelle_number;
+  const qr = settings[`${method}_qr`];
+  $("#payment-instructions").innerHTML =
+    `<div class="payment-instruction-card electronic-payment"><div class="payment-qr-wrap">${qrPreview(qr, method)}</div><div><span class="eyebrow">${paymentMethodName(method).toUpperCase()} PAYMENT</span><h3>${money(total)}</h3><span class="recipient-label">${method === "venmo" ? "Venmo username" : "Zelle phone number / email"}</span><p class="payment-recipient">${recipient ? escape(method === "venmo" ? `@${recipient}` : recipient) : "Payment details will be added soon."}</p><p>${recipient || qr ? "Use your payment app and verify the recipient before sending." : "Please contact The Office of Yash SR for payment details."}</p><p class="payment-reference">Include invoice reference <strong>${escape(checkout.invoice.number)}</strong>.</p></div></div>`;
+}
+
+async function paymentSettings() {
+  const { payment_settings: settings } = await api("/payment-settings");
+  state.paymentSettings = settings;
+  showModal(
+    "Payment methods",
+    `<form id="payment-settings-form" class="modal-form"><p class="muted">These receiving details are shown to signed-in customers. Add your real details and QR codes whenever you’re ready.</p><label>Cash payment instructions<textarea name="cash_instructions" maxlength="1500" rows="3">${escape(settings.cash_instructions)}</textarea></label>${["venmo", "zelle"].map((method) => `<section class="payment-setup-section"><h3>${paymentMethodName(method)}</h3><label>${method === "venmo" ? "Venmo username" : "Zelle phone number or email"}<input name="${method === "venmo" ? "venmo_username" : "zelle_number"}" value="${escape(method === "venmo" ? settings.venmo_username : settings.zelle_number)}" maxlength="120" placeholder="${method === "venmo" ? "Add your Venmo username" : "Add your Zelle phone number or email"}"></label><div id="${method}-qr-preview" class="settings-qr-preview">${qrPreview(settings[`${method}_qr`], method)}</div><label>${paymentMethodName(method)} QR code<input type="file" name="${method}_qr_file" data-qr-method="${method}" accept="image/png,image/jpeg,image/webp"></label><p class="field-hint">PNG, JPEG, or WebP, up to 1 MB. Leave empty to keep the current code.</p><button type="button" class="text-button" data-action="remove-payment-qr" data-method="${method}">Remove ${paymentMethodName(method)} code</button></section>`).join("")}${formEnd("Save payment methods")}</form>`,
+    true,
+  );
+}
+
+function readQrFile(file) {
+  if (!file || file.size === 0) return Promise.resolve(undefined);
+  if (
+    !["image/png", "image/jpeg", "image/webp"].includes(file.type) ||
+    file.size > 1024 * 1024
+  )
+    return Promise.reject(
+      new Error("Choose a PNG, JPEG, or WebP image up to 1 MB."),
+    );
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Could not read this QR image."));
+    reader.readAsDataURL(file);
+  });
+}
+
 function reviewPlan(id) {
   const p = state.plans.find((p) => p.id === Number(id));
   showModal(
@@ -398,6 +515,22 @@ document.addEventListener("click", async (event) => {
     if (action === "close-modal") modal.close();
     if (action === "request-plan") requestPlan();
     if (action === "record-payment") recordPayment();
+    if (action === "pay-invoice") await openPayment(button.dataset.id);
+    if (action === "payment-settings") await paymentSettings();
+    if (action === "payment-method") {
+      state.checkout.method = button.dataset.method;
+      updateCheckout();
+    }
+    if (action === "tip-preset") {
+      $("#checkout-tip").value = button.dataset.amount;
+      updateCheckout();
+    }
+    if (action === "remove-payment-qr") {
+      const method = button.dataset.method;
+      $("#payment-settings-form").dataset[`${method}Remove`] = "true";
+      $(`[name=${method}_qr_file]`).value = "";
+      $(`#${method}-qr-preview`).innerHTML = qrPreview("", method);
+    }
     if (action === "review-plan") reviewPlan(button.dataset.id);
     if (action === "print-invoice") window.print();
     if (action === "add-item") {
@@ -445,14 +578,42 @@ function updateTotal() {
         Number($("[name=quantity]", row).value || 0),
     0,
   );
-  $("#invoice-form-total").textContent = money(amount);
+  const discountField = $("[name=discount_amount]");
+  const discount = Math.round(Number(discountField.value || 0) * 100);
+  discountField.max = (amount / 100).toFixed(2);
+  discountField.setCustomValidity(
+    discount > amount ? "The discount cannot exceed the charges subtotal." : "",
+  );
+  $("#invoice-form-total").textContent = money(amount - discount);
 }
 document.addEventListener("input", (event) => {
   if (event.target.id === "invoice-search") {
     state.search = event.target.value;
     $("#invoice-results").innerHTML = invoiceTable(state.invoices);
   }
-  if (event.target.closest(".item-row")) updateTotal();
+  if (
+    event.target.closest(".item-row") ||
+    event.target.name === "discount_amount"
+  )
+    updateTotal();
+  if (event.target.id === "checkout-tip") updateCheckout();
+});
+document.addEventListener("change", async (event) => {
+  if (!event.target.dataset.qrMethod) return;
+  const method = event.target.dataset.qrMethod;
+  try {
+    const image = await readQrFile(event.target.files[0]);
+    if (image) $(`#${method}-qr-preview`).innerHTML = qrPreview(image, method);
+  } catch (error) {
+    event.target.value = "";
+    const removed =
+      $("#payment-settings-form").dataset[`${method}Remove`] === "true";
+    $(`#${method}-qr-preview`).innerHTML = qrPreview(
+      removed ? "" : state.paymentSettings?.[`${method}_qr`] || "",
+      method,
+    );
+    toast(error.message);
+  }
 });
 document.addEventListener("submit", async (event) => {
   const form = event.target;
@@ -482,6 +643,22 @@ document.addEventListener("submit", async (event) => {
     }
     let message = "",
       createdId;
+    if (form.id === "payment-settings-form") {
+      const body = {
+        cash_instructions: values.cash_instructions,
+        venmo_username: values.venmo_username,
+        zelle_number: values.zelle_number,
+      };
+      for (const method of ["venmo", "zelle"]) {
+        const file = $(`[name=${method}_qr_file]`, form).files[0];
+        if (file) body[`${method}_qr`] = await readQrFile(file);
+        else if (form.dataset[`${method}Remove`] === "true")
+          body[`${method}_qr`] = "";
+      }
+      await api("/payment-settings", body);
+      message =
+        "Payment methods saved. Your customers can now see these details.";
+    }
     if (form.id === "customer-form") {
       await api("/customers", values);
       message =

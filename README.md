@@ -59,12 +59,26 @@ The first command to create an administrator asks for a password without display
 
 1. Sign in as the administrator. Open **Customers → Add customer** and create the customer's temporary password.
 2. Share their email, portal address, and temporary password securely. Invitation and password reset emails are not sent automatically. Customers must choose a new password at first sign-in. An administrator can reset customer access from the Customers page.
-3. Use **Create invoice** to choose a customer, enter the due date, and add descriptions, quantities, and prices for each individual charge. The invoice is immediately visible to that customer.
+3. Use **Create invoice** to choose a customer, enter the due date, and add descriptions, quantities, and prices for each individual charge. Add an optional **Discount amount ($)** and label such as “Holiday sale” to subtract a dollar amount from the charges. The invoice is immediately visible to that customer.
 4. Customers see their own outstanding balance, due dates, line items, payment history, and plan requests. They can open an unpaid invoice and propose a monthly payment and start date.
 5. Open **Plan requests** as administrator to approve or decline, with a response visible to the customer.
-6. Use **Record payment** on an invoice after receiving money. The balance and paid status update immediately.
+6. Use **Record payment** on an invoice after receiving money. Enter the amount applied to the invoice, any tip received separately, and the payment method. The balance and paid status update immediately. Tips appear in payment history but do not reduce the amount owed on the invoice.
 
-All amounts are **USD**. Quantities are whole numbers; prices support two decimal places. Plans are proposals and approvals recorded in the portal. They do not automatically change due dates, collect money, charge cards, or schedule debits. Arrange payment directly and record it as received. Online payments, email notifications, tax calculations, invoice editing/voiding, automatic reminders, and multi-business tenancy are not included.
+All amounts are **USD**. Quantities are whole numbers; prices support two decimal places. A discount cannot exceed the charges subtotal; a fully discounted invoice has no balance due. Plans are proposals and approvals recorded in the portal. They do not automatically change due dates, collect money, charge cards, or schedule debits. Arrange payment directly and record it as received. Automatic payment processing, email notifications, tax calculations, invoice editing/voiding, automatic reminders, and multi-business tenancy are not included.
+
+## Cash, Venmo, Zelle, and optional tips
+
+As administrator, open **Account → Manage payment methods**. Add your cash payment instructions, Venmo username, Zelle phone number or email, and each service's actual QR image. PNG, JPEG, and WebP images up to **1 MB each** are supported. You can add these later, replace an image, or remove one. Empty file inputs preserve previously saved codes. These receiving details are shown only to signed-in users and are stored in the database with your billing data, so database backups include them. No payment API keys are needed.
+
+Customers open an unpaid invoice and choose **Make a payment**. They can select no tip, a preset dollar tip, or enter another tip amount, then choose:
+
+- **Cash:** the total to pay in person, including the selected optional tip, and your cash instructions.
+- **Venmo:** the total to send, your username, QR image, and invoice reference.
+- **Zelle:** the total to send, your number/email, QR image, and invoice reference.
+
+Unconfigured details show a clear placeholder; no real recipient or working QR code is invented. Customers send money in their own app or pay you in person. Selecting a method or tip does **not** send money, change the invoice debt, or mark it paid. Verify receipt, then record the invoice portion and tip separately. For example, if $80 is owed and you receive $90 including a $10 tip, record **Amount toward invoice: $80** and **Tip received: $10**. The invoice is paid and the $10 gratuity remains separately visible. The administrator's Payments received summary includes both recorded invoice payments and tips.
+
+Existing databases upgrade automatically on startup by adding defaulted discount/tip/method fields and the payment-settings table. Existing balances and payment history are retained. Back up production data before updating.
 
 ## Connect a domain and go live
 

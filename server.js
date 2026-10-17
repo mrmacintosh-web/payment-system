@@ -6,6 +6,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { normalizeOrigin } from "./lib/origin.js";
 import { createCsrfProtection } from "./lib/csrf.js";
 import {
+  getPaymentSettings,
+  savePaymentSettings,
+} from "./lib/payment-settings.js";
+import {
   openDatabase,
   hashPassword,
   verifyPassword,
@@ -79,14 +83,22 @@ const cents = (value, label = "Amount") => {
     fail(400, `${label} must be between $0.01 and $1,000,000.`);
   return result;
 };
-async function readBody(req) {
+const optionalCents = (value, label) => {
+  if (value == null || value === "") return 0;
+  if (typeof value === "string" && /^0(?:\.0{1,2})?$/.test(value)) return 0;
+  return cents(value, label);
+};
+async function readBody(req, limit = 32_768) {
   if (!req.headers["content-type"]?.startsWith("application/json"))
     fail(415, "Send JSON data.");
-  let body = "";
+  const chunks = [];
+  let size = 0;
   for await (const chunk of req) {
-    body += chunk;
-    if (Buffer.byteLength(body) > 32_768) fail(413, "Request is too large.");
+    size += chunk.length;
+    if (size > limit) fail(413, "Request is too large.");
+    chunks.push(chunk);
   }
+  const body = Buffer.concat(chunks).toString("utf8");
   try {
     const value = JSON.parse(body);
     if (!value || typeof value !== "object" || Array.isArray(value))
@@ -324,6 +336,10 @@ export function buildServer(options = {}) {
       }
       if (user.must_change_password)
         fail(403, "Change your temporary password before continuing.");
+      if (path === "/api/payment-settings" && req.method === "GET") {
+        json({ payment_settings: getPaymentSettings(db) });
+        return;
+      }
       if (path === "/api/invoices" && req.method === "GET") {
         const rows =
           user.role === "admin"
@@ -346,7 +362,7 @@ export function buildServer(options = {}) {
             .all(invoice.id),
           payments: db
             .prepare(
-              "SELECT id,amount,paid_date,reference FROM payments WHERE invoice_id=? ORDER BY paid_date DESC,id DESC",
+              "SELECT id,amount,tip_amount,method,paid_date,reference FROM payments WHERE invoice_id=? ORDER BY paid_date DESC,id DESC",
             )
             .all(invoice.id),
           plans: db
@@ -409,6 +425,11 @@ export function buildServer(options = {}) {
         return;
       }
       if (user.role !== "admin") fail(403, "Administrator access is required.");
+      if (path === "/api/payment-settings" && req.method === "POST") {
+        const body = await readBody(req, 3 * 1024 * 1024);
+        json({ payment_settings: savePaymentSettings(db, body) });
+        return;
+      }
       if (path === "/api/customers" && req.method === "GET") {
         json({
           customers: db
@@ -486,20 +507,37 @@ export function buildServer(options = {}) {
             fail(400, "Quantity must be a whole number between 1 and 10,000.");
           return { description, unit, quantity: item.quantity };
         });
-        if (
-          items.reduce((sum, item) => sum + item.unit * item.quantity, 0) >
-          MAX_CENTS
-        )
+        const subtotal = items.reduce(
+          (sum, item) => sum + item.unit * item.quantity,
+          0,
+        );
+        if (subtotal > MAX_CENTS)
           fail(400, "Invoice total cannot exceed $1,000,000.");
+        const discount = optionalCents(body.discount_amount, "Discount");
+        if (discount > subtotal)
+          fail(400, "The discount cannot exceed the charges subtotal.");
+        const discountLabel = text(
+          body.discount_label,
+          "Discount label",
+          200,
+          true,
+        );
         const id = transaction(db, () => {
           const today = new Date().toISOString().slice(0, 10);
           const id = Number(
             db
               .prepare(
-                "INSERT INTO invoices(customer_id,description,issued_date,due_date,notes) VALUES(?,?,?,?,?)",
+                "INSERT INTO invoices(customer_id,description,issued_date,due_date,notes,discount_amount,discount_label) VALUES(?,?,?,?,?,?,?)",
               )
-              .run(body.customer_id, description, today, due, notes)
-              .lastInsertRowid,
+              .run(
+                body.customer_id,
+                description,
+                today,
+                due,
+                notes,
+                discount,
+                discountLabel,
+              ).lastInsertRowid,
           );
           db.prepare("UPDATE invoices SET number=? WHERE id=?").run(
             `INV-${today.slice(0, 4)}-${String(id).padStart(4, "0")}`,
@@ -520,13 +558,20 @@ export function buildServer(options = {}) {
           invoice = invoiceFor(Number(match[1]), user);
         const amount = cents(body.amount),
           paidDate = date(body.paid_date, "payment date");
+        const tip = optionalCents(body.tip_amount, "Tip");
+        const method = body.method ?? "other";
+        if (!["cash", "venmo", "zelle", "other"].includes(method))
+          fail(
+            400,
+            "Choose cash, Venmo, Zelle, or other as the payment method.",
+          );
         if (paidDate > new Date().toISOString().slice(0, 10))
           fail(400, "Payment date cannot be in the future.");
         if (amount > invoice.balance)
           fail(400, "Payment cannot exceed the remaining balance.");
         const id = db
           .prepare(
-            "INSERT INTO payments(invoice_id,amount,paid_date,reference,recorded_by) VALUES(?,?,?,?,?)",
+            "INSERT INTO payments(invoice_id,amount,paid_date,reference,recorded_by,tip_amount,method) VALUES(?,?,?,?,?,?,?)",
           )
           .run(
             invoice.id,
@@ -534,6 +579,8 @@ export function buildServer(options = {}) {
             paidDate,
             text(body.reference, "Reference", 200, true),
             user.id,
+            tip,
+            method,
           ).lastInsertRowid;
         json({ id: Number(id) }, 201);
         return;
