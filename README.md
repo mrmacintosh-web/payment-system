@@ -4,7 +4,7 @@ A complete website with a database for managing what customers owe. It includes 
 
 The portal uses the Office's gold wordmark and a warm cream **Soft display** by default, with a charcoal theme available through the display toggle, and locally hosted Glacial Indifference typography. Customers arrive at a focused **Total due** screen; invoices, payment plans, and account settings are available from the top menu. The same branding appears on sign-in, invoices, and the browser favicon. The font's SIL Open Font License is bundled in `public/fonts/OFL.txt`.
 
-**For your Cloudflare domain:** follow [the step-by-step payments.yashsr.com deployment guide](DEPLOYMENT.md). It covers hosting, DNS, HTTPS, backups, and optional email.
+**For yashsr.com on Render:** follow [the hosting, domain, and email setup guide](DEPLOYMENT.md). The root redirects to `o.yashsr.com` for login, customers use `secure.yashsr.com`, and administrators use `secure-admin.yashsr.com`. It covers hosting, DNS, HTTPS, backups, and optional email.
 
 This is an HTML/CSS/JavaScript frontend with a Node.js server and SQLite database. A domain points to the server running the app; static HTML hosting alone cannot run the database or account system.
 
@@ -90,7 +90,7 @@ Every newly recorded payment creates an immutable receipt, including the custome
 
 After sending money, a customer can choose **I paid with Venmo/Zelle**, enter a reference, and confirm that they actually sent the payment. This creates a notice under the administrator's **Payment notices** menu; it does not mark the invoice paid. Only one notice per invoice can await review. The administrator checks the receiving account, then confirms the exact amount and date or rejects with a response. Confirmation records the payment and receipt together. Repeated confirmation cannot record it twice. While a notice is pending, direct manual recording is blocked to avoid counting the same money again; review the notice first.
 
-Optional thank-you emails and administrator payment notices use Resend. They require a verified sender, `RESEND_API_KEY`, `MAIL_FROM`, and a production HTTPS `PUBLIC_ORIGIN`. See [email setup](DEPLOYMENT.md#optional-receipt-and-administrator-emails). Portal receipts work without email, and demo mode never sends mail.
+Optional thank-you emails and administrator payment notices use Resend. They require a verified sender, `RESEND_API_KEY`, `MAIL_FROM`, and a production HTTPS `PUBLIC_ORIGIN`. See [email setup](DEPLOYMENT.md#4-enable-email-with-resend). Portal receipts work without email, and demo mode never sends mail.
 
 ## Display options
 
@@ -149,19 +149,21 @@ The Compose configuration sets `NODE_ENV=production`, binds the app inside Docke
 
 The app reads environment variables. `npm start` does not automatically load `.env`; use `node --env-file=.env server.js` when running directly. Docker Compose reads `.env` for substitution and passes the relevant variables to the app. The Docker deployment uses a fresh real database, separate from the demo.
 
-| Variable         | Default                                 | Purpose                                                                           |
-| ---------------- | --------------------------------------- | --------------------------------------------------------------------------------- |
-| `HOST`           | `127.0.0.1`                             | Interface to listen on                                                            |
-| `PORT`           | `3000`                                  | HTTP port                                                                         |
-| `DATABASE_PATH`  | `.data/billing.sqlite`                  | Persistent SQLite file                                                            |
-| `BUSINESS_NAME`  | `The Office of Yash SR: Payment Portal` | Name shown in the portal and on invoices                                          |
-| `PUBLIC_ORIGIN`  | Local HTTP origin                       | Exact browser origin; required HTTPS origin in production, with no trailing slash |
-| `NODE_ENV`       | development                             | Set `production` for public hosting                                               |
-| `RESEND_API_KEY` | unset                                   | Optional private Resend send-mail API key                                         |
-| `MAIL_FROM`      | unset                                   | Verified sender email for optional notifications                                  |
-| `ADMIN_EMAIL`    | administrator account emails            | Optional inbox override for payment notices                                       |
+| Variable          | Default                                 | Purpose                                                                           |
+| ----------------- | --------------------------------------- | --------------------------------------------------------------------------------- |
+| `HOST`            | `127.0.0.1`                             | Interface to listen on                                                            |
+| `PORT`            | `3000`                                  | HTTP port                                                                         |
+| `DATABASE_PATH`   | `.data/billing.sqlite`                  | Persistent SQLite file                                                            |
+| `BUSINESS_NAME`   | `The Office of Yash SR: Payment Portal` | Name shown in the portal and on invoices                                          |
+| `PUBLIC_ORIGIN`   | Local HTTP origin                       | Exact browser origin; required HTTPS origin in production, with no trailing slash |
+| `CUSTOMER_ORIGIN` | unset                                   | Optional customer HTTPS origin; set with ADMIN_ORIGIN for separate role domains   |
+| `ADMIN_ORIGIN`    | unset                                   | Optional administrator HTTPS origin; see DEPLOYMENT.md                            |
+| `NODE_ENV`        | development                             | Set `production` for public hosting                                               |
+| `RESEND_API_KEY`  | unset                                   | Optional private Resend send-mail API key                                         |
+| `MAIL_FROM`       | unset                                   | Verified sender email for optional notifications                                  |
+| `ADMIN_EMAIL`     | administrator account emails            | Optional inbox override for payment notices                                       |
 
-No external API keys are required for the portal. Optional email delivery requires a Resend key; see [DEPLOYMENT.md](DEPLOYMENT.md#optional-receipt-and-administrator-emails). Customers can never query other customers' invoices or plan requests. Passwords use salted scrypt hashes; sessions expire after 12 hours and are stored as token hashes in SQLite. Login is throttled, state-changing requests require a matching origin, and production cookies require HTTPS. Password resets invalidate customer sessions; password changes revoke their other sessions. Login throttling is in-process and resets when the app restarts. Behind a shared reverse proxy, the IP throttle applies to failed logins across that proxy; account-based throttling also applies.
+No external API keys are required for the portal. Optional email delivery requires a Resend key; see [DEPLOYMENT.md](DEPLOYMENT.md#4-enable-email-with-resend). Customers can never query other customers' invoices or plan requests. Passwords use salted scrypt hashes; sessions expire after 12 hours and are stored as token hashes in SQLite. Login is throttled, state-changing requests require a matching origin, and production cookies require HTTPS. Password resets invalidate customer sessions; password changes revoke their other sessions. Login throttling is in-process and resets when the app restarts. Behind a shared reverse proxy, the IP throttle applies to failed logins across that proxy; account-based throttling also applies.
 
 ## Backups and updates
 

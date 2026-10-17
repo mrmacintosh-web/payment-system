@@ -1,117 +1,102 @@
-# Put the portal on payments.yashsr.com
+# Deploy yashsr.com on Render, with Cloudflare DNS and Resend email
 
-Your domain is registered with Cloudflare. Keep it there. Use **payments.yashsr.com** for this portal so the main **yashsr.com** address can also host a separate website later.
+This setup uses **one paid Render web service with a persistent disk**, one SQLite database, and these addresses:
 
-GitHub stores your code. Codespaces runs a development copy. For customers, you need an always-on host for the Node.js server and a persistent disk for the SQLite database. Cloudflare DNS connects your domain to that host. Buying the domain does not provide the application server or an email inbox.
+| Address                           | Behavior                                        |
+| --------------------------------- | ----------------------------------------------- |
+| `https://yashsr.com`              | Redirects to the login page                     |
+| `https://o.yashsr.com`            | Shared login page                               |
+| `https://secure.yashsr.com`       | Customer dashboard and customer pages           |
+| `https://secure-admin.yashsr.com` | Administrator dashboard and administrator pages |
 
-## Recommended path: a Linux server with Docker
+Cloudflare remains your registrar and DNS provider. Render runs the backend and provides HTTPS. Resend sends optional transactional email. Buying a domain does not create hosting or an email inbox.
 
-The repository already includes the app, database setup, and Caddy HTTPS configuration. This path uses one Linux VPS with a permanent disk. You can choose a VPS provider such as DigitalOcean, Hetzner, or another provider supporting Docker. Hosting is a separate paid service.
+## 1. Create the Render service
 
-1. Create a Linux VPS, install Docker Engine and the Docker Compose plugin, and note its public IPv4 address. Follow your provider's SSH instructions to connect to the server. Allow inbound TCP **80** and **443** in its firewall. Keep application port 3000 private.
-2. Open **Cloudflare → yashsr.com → DNS → Records → Add record**:
+1. Sign in at [Render](https://dashboard.render.com/), choose **New → Web Service**, and connect GitHub repository `mrmacintosh-web/payment-system`.
+2. Choose branch `main`, runtime **Node**, build command `npm ci --omit=dev`, and start command `npm start`. Leave the root directory blank.
+3. Select a paid, always-on instance supporting persistent disks and service shell access. Use one instance, without autoscaling or previews sharing the production disk.
+4. Add a persistent disk mounted at **`/var/data`** (1 GB is plenty to start if offered). The database file must live on this disk, not inside the ephemeral repository checkout.
+5. Add the environment variables below. In dashboard input fields, paste the values without surrounding quotes.
 
-   | Setting      | Value                               |
-   | ------------ | ----------------------------------- |
-   | Type         | A                                   |
-   | Name         | payments                            |
-   | IPv4 address | Your VPS's public IPv4 address      |
-   | Proxy status | **DNS only** initially (gray cloud) |
-   | TTL          | Auto                                |
+   | Name              | Value                                   |
+   | ----------------- | --------------------------------------- |
+   | `NODE_VERSION`    | `24`                                    |
+   | `NODE_ENV`        | `production`                            |
+   | `HOST`            | `0.0.0.0`                               |
+   | `DATABASE_PATH`   | `/var/data/billing.sqlite`              |
+   | `PUBLIC_ORIGIN`   | `https://o.yashsr.com`                  |
+   | `CUSTOMER_ORIGIN` | `https://secure.yashsr.com`             |
+   | `ADMIN_ORIGIN`    | `https://secure-admin.yashsr.com`       |
+   | `BUSINESS_NAME`   | `The Office of Yash SR: Payment Portal` |
 
-   Do not enter the Codespaces address or GitHub repository URL. Add an AAAA record only if the server has working IPv6. Wait for `payments.yashsr.com` to resolve to your server.
+6. Set the health-check path to **`/api/health`** in the service's advanced/settings options. Do not override Render's supplied `PORT`.
+7. Create/deploy the service. When Render reports it is live, note its `.onrender.com` address. Its `/api/health` URL should return `{"status":"ok","database":true}`. The default Render hostname intentionally does not serve the account pages when the domain setup is enabled; configure the custom domains next.
 
-3. In the VPS terminal, download the code:
+The server creates the database and tables automatically. You do not need a separate Render Postgres service. A free or temporary filesystem cannot retain this SQLite database reliably.
+
+## 2. Add all four domains and Cloudflare records
+
+1. In the same Render service, open **Settings → Custom Domains** and add `o.yashsr.com`, `secure.yashsr.com`, `secure-admin.yashsr.com`, and `yashsr.com`. All four connect to this one service.
+2. In **Cloudflare → yashsr.com → DNS → Records**, add the records Render specifies. The three subdomains normally use CNAMEs:
+
+   | Type  | Name           | Target                                         |
+   | ----- | -------------- | ---------------------------------------------- |
+   | CNAME | `o`            | This service's actual `.onrender.com` hostname |
+   | CNAME | `secure`       | The same Render hostname                       |
+   | CNAME | `secure-admin` | The same Render hostname                       |
+
+   Use **DNS only** (gray cloud) initially. Do not include `https://`, a path, or a slash in a CNAME target. Do not create a second conflicting record if the name already exists.
+
+3. For the root record, name **`@`**, follow Render's apex-domain instructions. Cloudflare supports an apex CNAME through flattening if Render offers that method; otherwise use Render's stated A-record value. Do not guess a server IP. Keep the root record DNS only while verifying.
+4. Back in Render, verify each domain and wait for its HTTPS certificate to become ready. All three application subdomains need HTTPS before the login handoff works.
+5. Open `https://yashsr.com`: the application redirects it to `https://o.yashsr.com`. No separate Cloudflare redirect rule is needed for the root. The DNS record connects the root to Render; DNS itself does not perform an HTTP redirect.
+
+You can leave these records DNS only: Render already terminates HTTPS. If you later enable Cloudflare proxying, set **SSL/TLS → Full (strict)**, respect the application's `Cache-Control` headers, and do not apply **Cache Everything** to the portal. Test all login and sign-out flows again after changing proxy settings. Leave existing unrelated DNS/email records intact.
+
+## 3. Create the real administrator
+
+1. Open the Render service's **Shell** on the deployed instance with the persistent disk mounted.
+2. Run this with your actual email address:
 
    ```sh
-   git clone https://github.com/mrmacintosh-web/payment-system.git
-   cd payment-system
-   cp .env.example .env
-   nano .env
+   npm run create-admin -- you@example.com
    ```
 
-   Add this line to `.env`, then save and exit:
+3. Choose a password of 12–128 characters when prompted. Input is hidden. Do not put the password in command arguments, chat, source code, or a build command. The administrator and app must use the same configured `DATABASE_PATH`.
+4. Sign in at **`https://o.yashsr.com`**. Your administrator account goes to **`https://secure-admin.yashsr.com`**.
+5. Open **Account → Manage payment methods** and add your real receiving details. Under **Customers**, create a test customer's email and temporary password. Share these securely. That customer signs in at the same login page, lands on **`https://secure.yashsr.com`**, and must choose a new password before opening their invoices.
 
-   ```dotenv
-   DOMAIN=payments.yashsr.com
-   ```
+Do not run the demo commands on the production host. Production starts with a real database and no demonstration accounts or invoices.
 
-   The existing business name is already correct. Compose supplies the exact production origin, secure cookie settings, and persistent database path automatically. The other direct-Node settings in `.env.example` do not override Compose's production settings.
+## 4. Enable email with Resend
 
-4. Build and create your real administrator. Replace the example email with your own address; the command prompts privately for a password of at least 12 characters.
+1. Create a [Resend](https://resend.com/) account. Add **yashsr.com** as a sending domain.
+2. Copy Resend's exact DNS verification records into Cloudflare. The provider supplies the record types, names, and values. Verify them in Resend. Preserve existing email records; if SPF already exists, follow the provider's guidance instead of adding a conflicting second SPF record.
+3. Create a Resend API key allowed to send mail. In Render's private environment settings add:
 
-   ```sh
-   docker compose build
-   docker compose run --rm app node scripts/create-admin.js you@example.com
-   docker compose up -d
-   ```
+   | Name             | Value                                                                            |
+   | ---------------- | -------------------------------------------------------------------------------- |
+   | `RESEND_API_KEY` | Your real key, entered privately                                                 |
+   | `MAIL_FROM`      | `payments@yashsr.com`, after verifying this sending domain                       |
+   | `ADMIN_EMAIL`    | An inbox you actually read, including an existing Gmail/other address if desired |
 
-   This creates a fresh production database. It does not copy demonstration accounts or invoices. Do not use `npm run demo` or `npm run codespaces` for the public site.
+4. Save and redeploy/restart the service. Open the administrator **Account** screen to confirm email delivery is configured. Without `ADMIN_EMAIL`, administrator notices go to the email addresses of the app's administrator accounts.
+5. Confirm a legitimate payment: the customer immediately gets a dashboard receipt, and the server attempts the thank-you email within about 30 seconds. Customer email links point to `secure.yashsr.com`; administrator notices point to `secure-admin.yashsr.com`. Each requires sign-in.
+6. Use Resend's delivery dashboard and the recipient's spam folder if mail does not arrive. “Sent” in the portal means the provider accepted it, not guaranteed inbox placement. The sender address does not create an inbox; a separate mailbox provider is needed to receive replies at that address.
 
-5. Check that the site and HTTPS work:
+Email failures do not undo payments or dashboard receipts. Messages are stored in SQLite and retried with backoff and stable idempotency keys. After 12 failed attempts they remain pending for operator investigation. Fix provider settings before an operator resets affected pending rows' `attempts` and `next_attempt` to zero; do not reset sent rows. Only events occurring while delivery is configured are queued. Enabling email does not send historical receipts. Demo mode never sends mail. Invitation emails, password-reset emails, and automatic reminders are not implemented.
 
-   ```sh
-   docker compose ps
-   docker compose logs --tail=50 app caddy
-   curl --fail https://payments.yashsr.com/api/health
-   ```
+## 5. Verify and back up
 
-   Expect `{"status":"ok","database":true}`. Caddy obtains and renews the server's HTTPS certificate. If issuance fails, verify DNS and ports 80/443 before continuing.
+Test the root redirect, customer and administrator sign-ins, customer password change, customer isolation, invoice plans, a Venmo/Zelle notice, administrator verification, dashboard receipt, and email. Sign-out should return to the login page and require a new sign-in. Add real customer information only after checking these workflows.
 
-6. Open **https://payments.yashsr.com**, sign in, and add a customer. Share the login address and temporary password securely. Add your real receiving details under **Account → Manage payment methods**. Test with a small invoice before entering more customer records.
-7. You can leave Cloudflare DNS in **DNS only** mode; Caddy already provides HTTPS. If you enable the orange proxy later, choose **SSL/TLS → Overview → Full (strict)** first. Do not use Flexible. Keep API and account responses uncached; the app sends `Cache-Control: no-store` for API data. Remove any custom **Cache Everything** rule covering this portal. Test sign-in and payment notices again after enabling the proxy.
+The server stores invoices, plans, payments, receiving details/QR images, receipts, and notices in `/var/data/billing.sqlite`. Keep the service at **one instance**. Follow [README backup instructions](README.md#backups-and-updates), saving to a private path on the mounted disk and copying the backup to secure storage outside the service. Back up before updates and test restoration. Do not delete the persistent disk or replace its database with a demo file.
 
-The SQLite file and QR codes live in the persistent `billing_data` Docker volume. Rebuilding the app preserves that volume. **Do not run `docker compose down -v`**, which deletes it. Use the backup instructions in [README.md](README.md#backups-and-updates), store copies outside the server, and test that you can restore them.
+## How sign-in crosses the subdomains
 
-## Alternative: a managed Node host
+The backend uses host-only, Secure, HttpOnly cookies. A short-lived, single-use, browser-bound handoff moves sign-in from `o` to the correct role's portal, where a separate local session is created. Session credentials are not placed in redirect URLs or shared across every subdomain. Host, session audience, role, and request origin are checked on the server. Logout revokes the login and portal sessions in that browser's family.
 
-If you prefer a hosting dashboard, use a service offering **Node 24+, a persistent disk, and one always-on instance**. For example, a Render web service with a paid persistent disk can host this app. A free service with a temporary filesystem cannot safely retain this database.
+Single-domain deployments and Codespaces continue to work without `CUSTOMER_ORIGIN` and `ADMIN_ORIGIN`. Set both to enable this domain layout; it requires production mode with sibling HTTPS subdomains. The optional Docker/VPS setup in README uses a single domain by default. For a multi-domain VPS deployment, pass both origin variables to the app and configure the reverse proxy for all four hostnames.
 
-1. Connect this GitHub repository as a **web service**. Use build command `npm ci --omit=dev` and start command `npm start`. Select Node 24 or newer (for hosts supporting `NODE_VERSION`, set it to `24`).
-2. Attach a persistent disk at `/var/data`. Set these environment variables:
-
-   ```dotenv
-   NODE_ENV=production
-   HOST=0.0.0.0
-   PUBLIC_ORIGIN=https://payments.yashsr.com
-   DATABASE_PATH=/var/data/billing.sqlite
-   BUSINESS_NAME="The Office of Yash SR: Payment Portal"
-   ```
-
-   Use the port supplied by the host and set the health-check path to `/api/health`. Keep the service at one instance. Put the business name into dashboard fields without surrounding quotation marks.
-
-3. Add **payments.yashsr.com** under the host's custom-domain settings. The host will give you a DNS target and any verification records. In Cloudflare, add the specified record—usually **CNAME**, name **payments**, target supplied by the host—and start with **DNS only**. Wait for the host to verify the domain and provision HTTPS. Follow the provider's record instructions if they differ.
-4. Open the host's shell on the service with the persistent disk mounted. Run `npm run create-admin -- you@example.com`. The configured `DATABASE_PATH` must match the running app. Then open your custom domain to sign in. If shell access is unavailable, use a host/plan that provides it; do not create the administrator in an ephemeral build job.
-
-The included Docker/VPS path is fully specified above; a managed host may have provider-specific disk, shell, and custom-domain requirements. **GitHub Pages and Cloudflare Pages static hosting cannot run this Node/SQLite server as-is.**
-
-## Optional receipt and administrator emails
-
-Dashboard receipts and payment notices work immediately, including without email. To also send email, this app supports **Resend** through its HTTPS API; it needs no additional Node packages.
-
-1. Create a Resend account. Add a sending domain such as **yashsr.com** (or a dedicated sending subdomain) and copy the DNS verification records Resend provides into Cloudflare. Use the exact names and values from Resend. Preserve existing mail records; if you already use SPF, follow the provider's guidance rather than adding a conflicting second SPF record.
-2. Wait for Resend to mark the domain verified. Create an API key allowed to send mail. A verified sending address does not create an email inbox.
-3. Configure these on the production host. For Docker, edit the ignored `.env`; for managed hosting, use the service's environment/secret settings:
-
-   ```dotenv
-   RESEND_API_KEY=<your real Resend key, entered privately>
-   MAIL_FROM=payments@yashsr.com
-   ADMIN_EMAIL=<your real administrator email address>
-   ```
-
-   Replace the placeholders and use a sender on the domain you verified. Do not commit this file or paste the key into chat. `ADMIN_EMAIL` is optional: when omitted, notices go to the email addresses of the portal's administrator accounts. Use an actual inbox you can read.
-
-4. Restart/redeploy the app (`docker compose up -d` for Docker). Production also needs `PUBLIC_ORIGIN=https://payments.yashsr.com`, which Compose already sets. Open **Account** as administrator to see whether delivery is configured and how many messages are queued/sent.
-5. Confirm a legitimate payment. Its receipt appears immediately; the server attempts the thank-you email within about 30 seconds. When a customer reports a Venmo or Zelle payment, the administrator gets a verification notice. Check the provider's delivery dashboard and spam folder if mail does not arrive. “Sent” in the portal means the provider accepted it, not a guarantee of inbox delivery.
-
-Email failures leave the financial record and dashboard receipt intact. Mail is queued in SQLite, retried with backoff using a stable idempotency key, and retained across restarts. After 12 failed attempts a message stays pending for operator investigation; the system does not retry it forever. Fix the provider configuration first, then an operator can reset the affected queue rows' `attempts` and `next_attempt` to zero. Do not reset sent rows. Keep restores in mind: reverting to a backup can also restore old queue state.
-
-Only events occurring while email is configured are queued; enabling it later does not send historical receipts. **Demo mode never queues or sends email**, even if keys are present. Invitation emails, password-reset emails, and automatic reminders are not implemented.
-
-## What the backend does
-
-The browser calls the Node server at the same domain. The server validates sign-ins and invoice access, calculates fees and balances in integer cents, and stores invoices, schedules, payments, receiving details, receipts, and notices in SQLite. Customers can only read their own billing data. Passwords are salted hashes; sessions use HttpOnly cookies.
-
-A customer's “I paid” action creates a declaration awaiting review. It does not contact Venmo/Zelle to check a transfer or collect money. You verify your receiving account, then confirm the notice; the server records the payment and creates the receipt together in one database transaction. For cash, use **Record payment** after receiving it. Tips remain separate from the amount applied to the invoice.
-
-You still need to choose and provision hosting before DNS can be connected. This repository change does not create a hosting account, change Cloudflare records, or enable a live email sender.
+This code update does not provision Render, change Cloudflare DNS, or configure a live Resend sender. Complete those steps in your accounts.

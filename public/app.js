@@ -127,6 +127,10 @@ function portalBrand(large = false) {
   return `<a class="brand ${large ? "brand-large" : ""}" href="/" aria-label="${escape(state.config.business_name)}"><img class="brand-logo" src="/brand/office-logo.png" alt="The Office of Yash Sunder Raj logo" width="240" height="100"><span class="brand-name">${escape(state.config.business_name)}</span></a>`;
 }
 function renderLogin(error = "") {
+  if (state.config.portal_role && state.config.portal_role !== "login") {
+    location.replace(state.config.login_url);
+    return;
+  }
   app.innerHTML = `<main class="login-layout"><section class="login-story"><div class="login-brand">${portalBrand(true)}</div><div class="story-content"><span class="eyebrow">A CLEARER VIEW OF YOUR ACCOUNT</span><h1>Your account.<br>All in one place.</h1><p>View your invoices, understand every charge,<br class="desktop-only"> and find a payment plan that works for you.</p><div class="story-features"><span>${icon("invoice")} Itemized invoices</span><span>${icon("plan")} Flexible payment requests</span></div></div><p class="story-footer">The Office of Yash SR · Your payment portal</p></section><section class="login-panel"><div class="login-form-wrap"><span class="eyebrow">PAYMENT PORTAL</span><h2>Welcome back.</h2><p class="muted login-subtitle">Sign in to view your account.</p><form id="login-form"><label>Email address<input name="email" type="email" autocomplete="username" placeholder="you@example.com" required maxlength="254"></label><label>Password<input name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required maxlength="128"></label><p class="form-error" role="alert">${escape(error)}</p><button class="button primary full" type="submit">Sign in ${icon("arrow")}</button></form><p class="login-help">Need access or a password reset?<br>Contact The Office of Yash SR.</p>${state.config.demo ? `<div class="demo-box"><span class="eyebrow">EXPLORE THE PORTAL</span><p>Try an account with sample information.</p><div class="demo-buttons"><button class="button secondary" data-action="demo-admin">${icon("grid")} Admin demo</button><button class="button secondary" data-action="demo-customer">${icon("settings")} Customer demo</button></div></div>` : ""}<div class="secure-note">${icon("lock")} Private access. Clear information.</div></div><p class="login-bottom">${escape(state.config.business_name)}</p></section></main>`;
 }
 async function loadData() {
@@ -147,7 +151,11 @@ async function loadData() {
   state.emailStatus = emailStatus;
 }
 async function signIn(email, password) {
-  const { user } = await api("/login", { email, password });
+  const { user, redirect_url } = await api("/login", { email, password });
+  if (redirect_url) {
+    location.assign(redirect_url);
+    return;
+  }
   state.user = user;
   state.view = "overview";
   state.search = "";
@@ -563,7 +571,11 @@ document.addEventListener("click", async (event) => {
       );
     }
     if (action === "logout") {
-      await api("/logout", {});
+      const { redirect_url } = await api("/logout", {});
+      if (redirect_url) {
+        location.replace(redirect_url);
+        return;
+      }
       state.user = null;
       modal.close();
       renderLogin();
@@ -883,7 +895,11 @@ async function init() {
     state.config = await api("/config");
     document.title = state.config.business_name;
     try {
-      const { user } = await api("/me");
+      const { user, redirect_url } = await api("/me");
+      if (redirect_url) {
+        location.replace(redirect_url);
+        return;
+      }
       state.user = user;
     } catch (error) {
       if (error.message !== "Please sign in to continue.") throw error;

@@ -5,6 +5,7 @@ import { resolve, dirname } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { normalizeOrigin } from "./lib/origin.js";
 import { createCsrfProtection } from "./lib/csrf.js";
+import { configureSites, handlePortalAuth } from "./lib/portal-sites.js";
 import { planOptions, makeSchedule, presentPlan } from "./lib/plans.js";
 import { createNotifications } from "./lib/notifications.js";
 import { createReceipt, listReceipts } from "./lib/receipts.js";
@@ -130,6 +131,12 @@ export function buildServer(options = {}) {
     throw new Error(
       "Production requires PUBLIC_ORIGIN to be an exact HTTPS origin, e.g. https://billing.example.com",
     );
+  const sites = configureSites({
+    publicOrigin,
+    production,
+    customerOrigin: options.customerOrigin ?? process.env.CUSTOMER_ORIGIN,
+    adminOrigin: options.adminOrigin ?? process.env.ADMIN_ORIGIN,
+  });
   const db = openDatabase(
     options.databasePath ||
       process.env.DATABASE_PATH ||
@@ -157,6 +164,8 @@ export function buildServer(options = {}) {
   const notifications = createNotifications(db, {
     demo,
     publicOrigin,
+    customerOrigin: sites?.customer,
+    adminOrigin: sites?.admin,
     businessName,
     mail: options.mail,
   });
@@ -172,6 +181,19 @@ export function buildServer(options = {}) {
       .get(...(user.role === "customer" ? [id, user.id] : [id]));
     if (!row) fail(404, "Invoice not found.");
     return presentInvoice(row);
+  };
+  const sessionFor = (req) => {
+    const token = (req.headers.cookie || "")
+      .split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${cookieName}=`))
+      ?.slice(cookieName.length + 1);
+    if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
+    return db
+      .prepare(
+        "SELECT s.*,u.full_name,u.email,u.role,u.must_change_password,u.password_hash FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?",
+      )
+      .get(tokenHash(token), Date.now());
   };
   const server = createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -196,6 +218,34 @@ export function buildServer(options = {}) {
     };
     try {
       const path = new URL(req.url, "http://localhost").pathname;
+      if (req.method === "GET" && path === "/api/health") {
+        json({
+          status: "ok",
+          database: db.prepare("SELECT 1 AS ok").get().ok === 1,
+        });
+        return;
+      }
+      const site = sites?.forHost(req.headers.host);
+      if (sites && !site)
+        fail(421, "Use one of the configured portal domains.");
+      let session = sessionFor(req);
+      if (sites && session?.audience !== site.origin) session = null;
+      const user = session ? { ...session, id: session.user_id } : null;
+      if (
+        sites &&
+        (await handlePortalAuth({
+          req,
+          res,
+          path,
+          site,
+          sites,
+          db,
+          session,
+          user,
+          sessionCookie: cookie,
+        }))
+      )
+        return;
       if (!path.startsWith("/api/")) {
         if (req.method !== "GET" && req.method !== "HEAD")
           fail(405, "Method not allowed.");
@@ -228,18 +278,12 @@ export function buildServer(options = {}) {
         res.end(req.method === "HEAD" ? undefined : body);
         return;
       }
-      if (req.method === "GET" && path === "/api/health") {
-        json({
-          status: "ok",
-          database: db.prepare("SELECT 1 AS ok").get().ok === 1,
-        });
-        return;
-      }
       if (req.method === "GET" && path === "/api/config") {
         json({
           business_name: businessName,
           demo,
           currency: "USD",
+          ...(sites ? { login_url: sites.login, portal_role: site.role } : {}),
           ...(csrf ? { csrf_token: csrf.issue(req, res) } : {}),
         });
         return;
@@ -247,7 +291,8 @@ export function buildServer(options = {}) {
       if (!["GET", "POST"].includes(req.method))
         fail(405, "Method not allowed.");
       if (req.method === "POST") {
-        const expectedOrigin = publicOrigin || `http://${req.headers.host}`;
+        const expectedOrigin =
+          site?.origin || publicOrigin || `http://${req.headers.host}`;
         if (
           (req.headers.origin !== expectedOrigin && !csrf?.verify(req)) ||
           req.headers["sec-fetch-site"] === "cross-site"
@@ -260,6 +305,8 @@ export function buildServer(options = {}) {
           );
       }
       if (req.method === "POST" && path === "/api/login") {
+        if (sites && site.role !== "login")
+          fail(403, "Sign in through the login domain.");
         const body = await readBody(req);
         const address = email(body.email);
         if (typeof body.password !== "string" || body.password.length > 128)
@@ -292,38 +339,45 @@ export function buildServer(options = {}) {
         db.prepare("DELETE FROM sessions WHERE expires_at < ?").run(now);
         const token = randomBytes(32).toString("hex");
         db.prepare(
-          "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES(?,?,?)",
-        ).run(tokenHash(token), user.id, now + SESSION_SECONDS * 1000);
+          "INSERT INTO sessions(token_hash,user_id,expires_at,family_id,audience) VALUES(?,?,?,?,?)",
+        ).run(
+          tokenHash(token),
+          user.id,
+          now + SESSION_SECONDS * 1000,
+          tokenHash(token),
+          site?.origin || "",
+        );
         res.setHeader("Set-Cookie", cookie(token, SESSION_SECONDS));
-        json({ user: safeUser(user) });
+        json({
+          user: safeUser(user),
+          ...(sites
+            ? { redirect_url: `${sites.forRole(user.role)}/auth/start` }
+            : {}),
+        });
         return;
       }
-      const sessionToken = (req.headers.cookie || "")
-        .split(";")
-        .map((v) => v.trim())
-        .find((v) => v.startsWith(`${cookieName}=`))
-        ?.slice(cookieName.length + 1);
-      const user =
-        sessionToken && /^[a-f0-9]{64}$/.test(sessionToken)
-          ? db
-              .prepare(
-                "SELECT u.* FROM users u JOIN sessions s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>?",
-              )
-              .get(tokenHash(sessionToken), Date.now())
-          : null;
       if (!user) fail(401, "Please sign in to continue.");
+      if (sites && site.role !== "login" && user.role !== site.role)
+        fail(403, "This account cannot access this portal.");
       if (path === "/api/me" && req.method === "GET") {
-        json({ user: safeUser(user) });
+        json({
+          user: safeUser(user),
+          ...(sites && site.role === "login"
+            ? { redirect_url: `${sites.forRole(user.role)}/auth/start` }
+            : {}),
+        });
         return;
       }
       if (path === "/api/logout" && req.method === "POST") {
-        db.prepare("DELETE FROM sessions WHERE token_hash=?").run(
-          tokenHash(sessionToken),
-        );
+        db.prepare(
+          "DELETE FROM sessions WHERE token_hash=? OR family_id=?",
+        ).run(session.token_hash, session.family_id || session.token_hash);
         res.setHeader("Set-Cookie", cookie("", 0));
-        json({ ok: true });
+        json({ ok: true, ...(sites ? { redirect_url: sites.login } : {}) });
         return;
       }
+      if (sites && site.role === "login")
+        fail(403, "Open your account on its customer or administrator portal.");
       if (path === "/api/change-password" && req.method === "POST") {
         const body = await readBody(req);
         if (
@@ -341,7 +395,7 @@ export function buildServer(options = {}) {
           ).run(hashPassword(next), user.id);
           db.prepare(
             "DELETE FROM sessions WHERE user_id=? AND token_hash<>?",
-          ).run(user.id, tokenHash(sessionToken));
+          ).run(user.id, session.token_hash);
         });
         json({ ok: true });
         return;
