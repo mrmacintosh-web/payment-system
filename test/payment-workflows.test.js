@@ -134,6 +134,73 @@ test("plan thresholds are inclusive, after discounts, and full-only restrictions
   }
 });
 
+test("creating an invoice queues one ready email for its customer with the discounted total, due date, and portal link", async () => {
+  const f = await fixture();
+  try {
+    const id = await f.invoice("100.00", {
+      discount_amount: "25.00",
+      description: "Invoice email test",
+      due_date: future,
+    });
+    const details = await f.details(id);
+    assert.equal(details.invoice.balance, 7500);
+    assert.equal(f.db.prepare("SELECT COUNT(*) n FROM payments").get().n, 0);
+    assert.equal(
+      f.db.prepare("SELECT COUNT(*) n FROM email_outbox").get().n,
+      1,
+    );
+    const rejected = await f.request(
+      "/invoices",
+      {
+        customer_id: details.invoice.customer_id,
+        description: "Invalid invoice",
+        due_date: future,
+        items: [{ description: "Invalid", quantity: 1, unit_amount: "-1.00" }],
+      },
+      f.admin,
+    );
+    assert.equal(rejected.status, 400);
+    assert.equal(
+      f.db.prepare("SELECT COUNT(*) n FROM email_outbox").get().n,
+      1,
+      "invalid invoices do not queue mail",
+    );
+    await f.flushEmail();
+    assert.equal(f.sent.length, 1);
+    assert.equal(f.sent[0].recipient, "alex@example.com");
+    assert.match(f.sent[0].subject, /Your invoice is ready/);
+    assert.ok(f.sent[0].body.includes(details.invoice.number));
+    assert.match(f.sent[0].body, /Invoice email test/);
+    assert.match(f.sent[0].body, /Total due: \$75.00/);
+    assert.ok(f.sent[0].body.includes(future));
+    assert.match(f.sent[0].body, /https:\/\/payments.yashsr.com/);
+    await f.flushEmail();
+    assert.equal(f.sent.length, 1, "the ready email is only sent once");
+  } finally {
+    await f.close();
+  }
+});
+
+test("invoice creation works without email configuration and does not queue historical notifications", async () => {
+  const f = await fixture({
+    mail: { apiKey: "", from: "payments@example.com" },
+  });
+  try {
+    const id = await f.invoice("25.00");
+    assert.equal((await f.details(id)).invoice.balance, 2500);
+    assert.equal(
+      f.db.prepare("SELECT COUNT(*) n FROM email_outbox").get().n,
+      0,
+    );
+    assert.equal(
+      (await f.request("/email-status", undefined, f.admin)).data.enabled,
+      false,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
 test("plan requests require explicit fee consent and approval applies exactly one fee with a cent-exact schedule", async () => {
   const f = await fixture();
   try {
@@ -375,15 +442,20 @@ test("customer declarations leave debt unchanged, require attestation, and admin
       403,
     );
     await f.flushEmail();
-    assert.equal(f.sent.length, 2);
-    assert.equal(f.sent[0].recipient, "admin@example.com");
-    assert.match(f.sent[0].body, /not verified payment/);
-    assert.equal(f.sent[1].recipient, "alex@example.com");
-    assert.match(f.sent[1].subject, /Thank you/);
-    assert.match(f.sent[1].body, /\$80.00/);
-    assert.match(f.sent[1].body, /https:\/\/payments.yashsr.com/);
+    assert.equal(f.sent.length, 3);
+    const noticeEmail = f.sent.find((message) =>
+      message.subject.startsWith("Verify"),
+    );
+    const receiptEmail = f.sent.find((message) =>
+      message.subject.startsWith("Thank you"),
+    );
+    assert.equal(noticeEmail.recipient, "admin@example.com");
+    assert.match(noticeEmail.body, /not verified payment/);
+    assert.equal(receiptEmail.recipient, "alex@example.com");
+    assert.match(receiptEmail.body, /\$80.00/);
+    assert.match(receiptEmail.body, /https:\/\/payments.yashsr.com/);
     await f.flushEmail();
-    assert.equal(f.sent.length, 2, "sent mail is not resent");
+    assert.equal(f.sent.length, 3, "sent mail is not resent");
   } finally {
     await f.close();
   }
@@ -456,13 +528,13 @@ test("mail failures stay queued without affecting money or receipts, and retry u
     );
     let status = (await f.request("/email-status", undefined, f.admin)).data;
     assert.equal(status.enabled, true);
-    assert.equal(status.pending, 1);
+    assert.equal(status.pending, 2);
     f.db.prepare("UPDATE email_outbox SET next_attempt=0").run();
     shouldFail = false;
     await f.flushEmail();
     status = (await f.request("/email-status", undefined, f.admin)).data;
-    assert.equal(status.sent, 1);
-    assert.equal(attempts[0], attempts[1]);
+    assert.equal(status.sent, 2);
+    assert.deepEqual(attempts.slice(0, 2), attempts.slice(2));
   } finally {
     await f.close();
   }
@@ -581,8 +653,9 @@ test("the Resend adapter constructs an authenticated text-email request without 
     const id = await f.invoice("50.00");
     await f.payment(id, "50.00");
     await f.flushEmail();
-    assert.equal(outgoing.length, 1);
-    const request = outgoing[0],
+    assert.equal(outgoing.length, 2);
+    assert.match(JSON.parse(outgoing[0].body).subject, /Your invoice is ready/);
+    const request = outgoing[1],
       body = JSON.parse(request.body);
     assert.equal(request.method, "POST");
     assert.equal(request.headers.Authorization, "Bearer test-only-secret");

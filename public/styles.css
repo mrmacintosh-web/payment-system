@@ -1889,6 +1889,84 @@ dialog::backdrop {
   margin-top: 27px;
   border-top: 1px solid var(--line);
 }
+.payment-report-action {
+  margin-top: 18px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+}
+.payment-report-action p {
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.payment-pending-content {
+  padding: 32px 28px 26px;
+  text-align: center;
+}
+.payment-pending-symbol {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  margin: 0 auto 20px;
+  background: #c3b32712;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--gold);
+}
+.payment-pending-symbol .icon {
+  width: 30px;
+  height: 30px;
+}
+.payment-pending-content h3 {
+  font-size: 29px;
+  line-height: 1.3;
+  margin: 18px 0 14px;
+}
+.payment-pending-summary {
+  border-block: 1px solid var(--line);
+  margin: 24px 0;
+  padding: 22px 0;
+}
+.payment-pending-summary > span,
+.payment-pending-summary > small {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+.payment-pending-summary > strong {
+  display: block;
+  font-size: clamp(30px, 8vw, 42px);
+  color: var(--gold);
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.payment-pending-summary p {
+  margin-block: 8px;
+  overflow-wrap: anywhere;
+}
+.payment-pending-summary .pending-reference {
+  font-size: 13px;
+  color: var(--muted);
+}
+.payment-pending-content .modal-actions {
+  justify-content: center;
+}
+.payment-pending-content .modal-actions .button {
+  white-space: normal;
+}
+.pending-payment-list {
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto 25px;
+}
+.pending-payment-list .info-note {
+  flex-wrap: wrap;
+  justify-content: center;
+}
 .payment-setup-section h3 {
   font-size: 24px;
   margin-bottom: 18px;

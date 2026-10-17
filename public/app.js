@@ -204,7 +204,17 @@ function customerOverview() {
     0,
   );
   const unpaid = state.invoices.filter((invoice) => invoice.balance > 0).length;
-  return `<section class="customer-overview"><p class="balance-greeting">Welcome back, ${escape(state.user.full_name.split(" ")[0])}.</p><div class="balance-hero" aria-labelledby="total-due-title"><span class="balance-rule" aria-hidden="true"></span><h1 id="total-due-title">Total due</h1><p class="balance-value ${money(outstanding).length > 10 ? "long-amount" : ""}" aria-label="Total due ${money(outstanding)}">${money(outstanding)}</p><p class="balance-note">${unpaid ? `Across ${unpaid} outstanding invoice${unpaid === 1 ? "" : "s"}. All amounts in USD.` : "You’re all paid up. Thank you."}</p><div class="balance-actions"><button class="button primary" data-view="invoices">View invoices ${icon("arrow")}</button>${unpaid ? `<button class="text-button" data-view="invoices">Request a payment plan ${icon("arrow")}</button>` : ""}${state.receipts.length ? `<button class="text-button" data-view="receipts">View receipts (${state.receipts.length}) ${icon("arrow")}</button>` : ""}</div></div><p class="balance-bottom-note">Every charge, every payment, clearly accounted for.</p></section>`;
+  return `<section class="customer-overview"><p class="balance-greeting">Welcome back, ${escape(state.user.full_name.split(" ")[0])}.</p><div class="balance-hero" aria-labelledby="total-due-title"><span class="balance-rule" aria-hidden="true"></span><h1 id="total-due-title">Total due</h1><p class="balance-value ${money(outstanding).length > 10 ? "long-amount" : ""}" aria-label="Total due ${money(outstanding)}">${money(outstanding)}</p><p class="balance-note">${unpaid ? `Across ${unpaid} outstanding invoice${unpaid === 1 ? "" : "s"}. All amounts in USD.` : "You’re all paid up. Thank you."}</p><div class="balance-actions"><button class="button primary" data-view="invoices">View invoices ${icon("arrow")}</button>${unpaid ? `<button class="text-button" data-view="invoices">Request a payment plan ${icon("arrow")}</button>` : ""}${state.receipts.length ? `<button class="text-button" data-view="receipts">View receipts (${state.receipts.length}) ${icon("arrow")}</button>` : ""}</div></div>${
+    state.reports.some((report) => report.status === "pending")
+      ? `<div class="pending-payment-list">${state.reports
+          .filter((report) => report.status === "pending")
+          .map(
+            (report) =>
+              `<div class="info-note">${icon("clock")}<span>${paymentMethodName(report.method)} payment of ${money(report.amount + report.tip_amount)} pending review.</span><button class="text-button" data-action="pay-invoice" data-id="${report.invoice_id}">View payment status ${icon("arrow")}</button></div>`,
+          )
+          .join("")}</div>`
+      : ""
+  }<p class="balance-bottom-note">Every charge, every payment, clearly accounted for.</p></section>`;
 }
 function overview() {
   if (!isAdmin()) return customerOverview();
@@ -343,7 +353,7 @@ async function openInvoice(id) {
             )
             .join("")}</section>`
         : ""
-    }${active ? `<div class="invoice-plan-note">${icon("plan")}<div><strong>${active.status === "pending" ? "Payment plan requested" : "Payment plan approved"}</strong><p>${money(active.monthly_amount)} / month · First payment ${day(active.start_date)}</p>${active.admin_note ? `<p>${escape(active.admin_note)}</p>` : ""}${planSummary(active)}</div></div>` : ""}</div><div class="invoice-dialog-footer"><button class="button secondary" data-action="print-invoice">${icon("print")} Print / Save PDF</button>${i.balance > 0 ? (isAdmin() ? `${pendingReport ? `<button class="button primary" data-action="review-report" data-id="${pendingReport.id}">Verify payment notice</button>` : `<button class="button primary" data-action="record-payment" data-id="${i.id}">${icon("plus")} Record payment</button>`}` : `<div class="invoice-customer-actions">${!pendingReport ? `<button class="button primary" data-action="pay-invoice" data-id="${i.id}">Make a payment ${icon("arrow")}</button>` : ""}${canRequest ? `<button class="button secondary" data-action="request-plan" data-id="${i.id}">${icon("plan")} Request payment plan</button>` : ""}</div>`) : '<span class="paid-message">' + icon("check") + " Paid in full. Thank you.</span>"}</div>`,
+    }${active ? `<div class="invoice-plan-note">${icon("plan")}<div><strong>${active.status === "pending" ? "Payment plan requested" : "Payment plan approved"}</strong><p>${money(active.monthly_amount)} / month · First payment ${day(active.start_date)}</p>${active.admin_note ? `<p>${escape(active.admin_note)}</p>` : ""}${planSummary(active)}</div></div>` : ""}</div><div class="invoice-dialog-footer"><button class="button secondary" data-action="print-invoice">${icon("print")} Print / Save PDF</button>${i.balance > 0 ? (isAdmin() ? `${pendingReport ? `<button class="button primary" data-action="review-report" data-id="${pendingReport.id}">Verify payment notice</button>` : `<button class="button primary" data-action="record-payment" data-id="${i.id}">${icon("plus")} Record payment</button>`}` : `<div class="invoice-customer-actions">${pendingReport ? `<button class="button secondary" data-action="pay-invoice" data-id="${i.id}">${icon("clock")} View payment status</button>` : `<button class="button primary" data-action="pay-invoice" data-id="${i.id}">Make a payment ${icon("arrow")}</button>`}${canRequest ? `<button class="button secondary" data-action="request-plan" data-id="${i.id}">${icon("plan")} Request payment plan</button>` : ""}</div>`) : '<span class="paid-message">' + icon("check") + " Paid in full. Thank you.</span>"}</div>`,
     true,
   );
 }
@@ -406,9 +416,11 @@ async function openPayment(id) {
     await openInvoice(id);
     return;
   }
-  if (details.reports?.some((r) => r.status === "pending")) {
-    toast("Your payment notice is awaiting verification.");
-    await openInvoice(id);
+  const pendingReport = details.reports?.find(
+    (report) => report.status === "pending",
+  );
+  if (pendingReport) {
+    showPendingPayment(pendingReport, details.invoice);
     return;
   }
   state.checkout = {
@@ -497,7 +509,7 @@ function updateCheckout() {
     method === "venmo" ? settings.venmo_username : settings.zelle_number;
   const qr = settings[`${method}_qr`];
   $("#payment-instructions").innerHTML =
-    `<div class="payment-instruction-card electronic-payment"><div class="payment-qr-wrap">${qrPreview(qr, method)}</div><div><span class="eyebrow">${paymentMethodName(method).toUpperCase()} PAYMENT</span><h3>${money(total)}</h3><span class="recipient-label">${method === "venmo" ? "Venmo username" : "Zelle phone number / email"}</span><p class="payment-recipient">${recipient ? escape(method === "venmo" ? `@${recipient}` : recipient) : "Payment details will be added soon."}</p><p>${recipient || qr ? "Use your payment app and verify the recipient before sending." : "Please contact The Office of Yash SR for payment details."}</p><p class="payment-reference">Include invoice reference <strong>${escape(checkout.invoice.number)}</strong>.</p>${recipient || qr ? `<button class="button primary" data-action="report-payment">I paid with ${paymentMethodName(method)} ${icon("arrow")}</button>` : ""}</div></div>`;
+    `<div class="payment-instruction-card electronic-payment"><div class="payment-qr-wrap">${qrPreview(qr, method)}</div><div><span class="eyebrow">${paymentMethodName(method).toUpperCase()} PAYMENT</span><h3>${money(total)}</h3><span class="recipient-label">${method === "venmo" ? "Venmo username" : "Zelle phone number / email"}</span><p class="payment-recipient">${recipient ? escape(method === "venmo" ? `@${recipient}` : recipient) : "Payment details will be added soon."}</p><p>${recipient || qr ? "Use your payment app and verify the recipient before sending." : "Please contact The Office of Yash SR for payment details."}</p><p class="payment-reference">Include invoice reference <strong>${escape(checkout.invoice.number)}</strong>.</p></div></div><div class="payment-report-action"><p>Already sent your payment? Tell us so the administrator can verify it.</p><button class="button primary full" data-action="report-payment">I paid with ${paymentMethodName(method)} ${icon("arrow")}</button></div>`;
 }
 
 async function paymentSettings() {
@@ -763,13 +775,22 @@ document.addEventListener("submit", async (event) => {
         "Payment recorded. The balance and customer’s receipt are ready.";
     }
     if (form.id === "report-form") {
-      await api(`/invoices/${form.dataset.id}/payment-reports`, {
-        ...state.pendingReport,
-        reference: values.reference,
-        attestation: values.attestation === "on",
-      });
-      message =
-        "Payment notice sent. Your balance will update after verification.";
+      const { report } = await api(
+        `/invoices/${form.dataset.id}/payment-reports`,
+        {
+          ...state.pendingReport,
+          reference: values.reference,
+          attestation: values.attestation === "on",
+        },
+      );
+      state.reports = [
+        report,
+        ...state.reports.filter((item) => item.id !== report.id),
+      ];
+      state.pendingReport = null;
+      render();
+      showPendingPayment(report, state.checkout.invoice);
+      return;
     }
     if (form.id === "report-review-form") {
       await api(`/payment-reports/${form.dataset.id}/review`, {
@@ -846,6 +867,12 @@ function openReceipt(id) {
 }
 function noticesPage() {
   return `${heading("VERIFY BEFORE CONFIRMING", "Payment notices", "Customers say they have paid. Check your own Venmo or Zelle account before confirming.")}<div class="plan-list">${state.reports.length ? state.reports.map((r) => `<section class="panel receipt-card"><div><h2>${escape(r.customer_name)} · ${money(r.amount + r.tip_amount)}</h2><p>${escape(r.invoice_number)} · ${paymentMethodName(r.method)} · ${day(r.created_at)}</p><p class="muted">${money(r.amount)} toward invoice · ${money(r.tip_amount)} tip</p><p>${escape(r.reference || "No reference provided")}</p><p><strong>${{ pending: "Awaiting verification", confirmed: "Confirmed — receipt issued", rejected: "Rejected — balance unchanged" }[r.status]}</strong></p>${r.admin_note ? `<p>${escape(r.admin_note)}</p>` : ""}</div>${r.status === "pending" ? `<button class="button primary" data-action="review-report" data-id="${r.id}">Verify payment ${icon("arrow")}</button>` : `<button class="button secondary" data-action="invoice" data-id="${r.invoice_id}">View invoice</button>`}</section>`).join("") : `<section class="panel empty-state"><h3>No payment notices yet.</h3><p>Venmo and Zelle notices appear here when a customer clicks “I paid.”</p></section>`}</div>`;
+}
+function showPendingPayment(report, invoice) {
+  showModal(
+    "Payment pending review",
+    `<section class="payment-pending-content"><span class="payment-pending-symbol">${icon("clock")}</span>${badge("pending")}<h3>Thank you for your payment.</h3><p>Your payment is pending review by an administrator.</p><div class="payment-pending-summary"><span>Reported payment</span><strong>${money(report.amount + report.tip_amount)}</strong><p>${paymentMethodName(report.method)} · ${escape(invoice.number)}</p><small>${money(report.amount)} toward invoice · ${money(report.tip_amount)} tip</small>${report.reference ? `<p class="pending-reference">Reference: ${escape(report.reference)}</p>` : ""}</div><p class="muted">Your balance will update and a receipt will appear in your dashboard after the administrator verifies the payment.</p><div class="modal-actions"><button class="button secondary" data-action="invoice" data-id="${invoice.id}">View invoice</button><button class="button primary" data-action="close-modal">Done ${icon("check")}</button></div></section>`,
+  );
 }
 function reportPayment() {
   const c = state.checkout,

@@ -623,7 +623,16 @@ export function buildServer(options = {}) {
           );
           return id;
         });
-        json({ id, status: "pending" }, 201);
+        json(
+          {
+            id,
+            status: "pending",
+            report: db
+              .prepare("SELECT * FROM payment_reports WHERE id=?")
+              .get(id),
+          },
+          201,
+        );
         return;
       }
       if (user.role !== "admin") fail(403, "Administrator access is required.");
@@ -821,6 +830,7 @@ export function buildServer(options = {}) {
             db.prepare(
               "INSERT INTO line_items(invoice_id,description,quantity,unit_amount) VALUES(?,?,?,?)",
             ).run(id, item.description, item.quantity, item.unit);
+          notifications.invoiceReady(invoiceFor(id, user));
           return id;
         });
         json({ id }, 201);

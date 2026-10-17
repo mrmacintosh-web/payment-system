@@ -509,11 +509,20 @@ test("receipt email links use the customer domain and payment notices use the ad
       200,
     );
     await f.flushEmail();
-    assert.equal(sent.length, 2);
-    assert.equal(sent[0].recipient, "admin@example.com");
-    assert.ok(sent[0].body.includes(adminOrigin));
-    assert.equal(sent[1].recipient, "customer@example.com");
-    assert.ok(sent[1].body.includes(customerOrigin));
+    assert.equal(sent.length, 3);
+    const ready = sent.find((message) =>
+      message.subject.startsWith("Your invoice"),
+    );
+    const notice = sent.find((message) => message.subject.startsWith("Verify"));
+    const receipt = sent.find((message) =>
+      message.subject.startsWith("Thank you"),
+    );
+    assert.equal(ready.recipient, "customer@example.com");
+    assert.ok(ready.body.includes(customerOrigin));
+    assert.equal(notice.recipient, "admin@example.com");
+    assert.ok(notice.body.includes(adminOrigin));
+    assert.equal(receipt.recipient, "customer@example.com");
+    assert.ok(receipt.body.includes(customerOrigin));
   } finally {
     await f.close();
   }
