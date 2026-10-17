@@ -63,7 +63,7 @@ You can leave these records DNS only: Render already terminates HTTPS. If you la
    npm run create-admin -- you@example.com
    ```
 
-3. Choose a password of 12–128 characters when prompted. Input is hidden. Do not put the password in command arguments, chat, source code, or a build command. The administrator and app must use the same configured `DATABASE_PATH`.
+3. Choose a password of 12–128 characters when prompted, then repeat it to confirm. Input is hidden by default. Append `--show-password` to display what you type in your own terminal. If an administrator was already created with an incorrect password, run `npm run reset-admin-password -- you@example.com --show-password` on the deployed service, replacing the email with the existing administrator address. This asks twice, revokes old sessions, and preserves the account and billing records. Do not put the password in command arguments, chat, source code, or a build command. The administrator and app must use the same configured `DATABASE_PATH`.
 4. Sign in at **`https://o.yashsr.com`**. Your administrator account goes to **`https://secure-admin.yashsr.com`**.
 5. Open **Account → Manage payment methods** and add your real receiving details. Under **Customers**, create a test customer's email and temporary password. Share these securely. That customer signs in at the same login page, lands on **`https://secure.yashsr.com`**, and must choose a new password before opening their invoices.
 

@@ -57,7 +57,17 @@ npm run create-admin -- you@example.com
 npm start
 ```
 
-The first command to create an administrator asks for a password without displaying it. Use 12–128 characters. It will not overwrite an existing account. Automation can supply `ADMIN_PASSWORD` securely through the process environment; do not put it in command arguments or commit it.
+The first command asks for a password and then asks you to repeat it. Use 12–128 characters. Input is hidden by default; a mismatch cancels creation. To see what you type in your own terminal, use `npm run create-admin -- you@example.com --show-password`. Creation never overwrites an existing account. Automation can supply `ADMIN_PASSWORD` securely through the process environment; do not put it in command arguments or commit it. `--show-password` explicitly uses interactive input even if that variable is present.
+
+If an administrator password was mistyped or forgotten, use the hosting service's shell on the instance with the database disk mounted:
+
+```sh
+npm run reset-admin-password -- you@example.com
+# Optional visible input, still confirmed twice:
+npm run reset-admin-password -- you@example.com --show-password
+```
+
+Replace the email with the existing administrator's address. Keep `DATABASE_PATH` the same as the running app. The reset changes only that administrator's password, signs out their existing sessions, and preserves customer accounts, invoices, and payments. It refuses missing or customer accounts. Visible input appears in that terminal, so use it only where you are comfortable displaying the password. If a deployed service says the npm script is missing, deploy the latest `main` commit and reopen its shell first.
 
 1. Sign in as the administrator. Open **Customers → Add customer** and create the customer's temporary password.
 2. Share their email, portal address, and temporary password securely. Invitation and password reset emails are not sent automatically. Customers must choose a new password at first sign-in. An administrator can reset customer access from the Customers page.

@@ -13,6 +13,7 @@
     "demo": "node scripts/demo.js",
     "codespaces": "node scripts/codespaces.js",
     "create-admin": "node scripts/create-admin.js",
+    "reset-admin-password": "node scripts/reset-admin-password.js",
     "test": "node --test --test-concurrency=1",
     "backup": "node scripts/backup.js"
   }
