@@ -9,6 +9,7 @@ import { configureSites, handlePortalAuth } from "./lib/portal-sites.js";
 import { planOptions, makeSchedule, presentPlan } from "./lib/plans.js";
 import { createNotifications } from "./lib/notifications.js";
 import { createLateFees } from "./lib/late-fees.js";
+import { createInvoiceChanges } from "./lib/invoice-changes.js";
 import { billingDate, BILLING_TIME_ZONE } from "./lib/billing-dates.js";
 import { createReceipt, listReceipts } from "./lib/receipts.js";
 import {
@@ -118,6 +119,66 @@ async function readBody(req, limit = 32_768) {
   }
 }
 
+function invoiceFields(body, current = null) {
+  const description = text(body.description, "Invoice title", 160),
+    due = date(body.due_date, "due date"),
+    notes = text(body.notes, "Notes", 2000, true);
+  if (
+    !Array.isArray(body.items) ||
+    body.items.length < 1 ||
+    body.items.length > 50
+  )
+    fail(400, "Add between 1 and 50 line items.");
+  const items = body.items.map((item) => {
+    if (!item || typeof item !== "object") fail(400, "Invalid line item.");
+    const description = text(item.description, "Charge description", 200),
+      unit = cents(item.unit_amount, "Unit price");
+    if (
+      !Number.isSafeInteger(item.quantity) ||
+      item.quantity < 1 ||
+      item.quantity > 10000
+    )
+      fail(400, "Quantity must be a whole number between 1 and 10,000.");
+    return { description, unit, quantity: item.quantity };
+  });
+  const subtotal = items.reduce(
+    (sum, item) => sum + item.unit * item.quantity,
+    0,
+  );
+  if (subtotal > MAX_CENTS)
+    fail(400, "Invoice total cannot exceed $1,000,000.");
+  const discount = optionalCents(body.discount_amount, "Discount");
+  if (discount > subtotal)
+    fail(400, "The discount cannot exceed the charges subtotal.");
+  const discountLabel = text(body.discount_label, "Discount label", 200, true);
+  const policy = body.payment_policy ?? current?.payment_policy ?? "eligible";
+  if (
+    ![
+      "full",
+      "eligible",
+      ...(current?.payment_policy === "legacy" ? ["legacy"] : []),
+    ].includes(policy)
+  )
+    fail(400, "Choose pay in full or eligible payment plans.");
+  if (
+    body.late_fee_enabled !== undefined &&
+    typeof body.late_fee_enabled !== "boolean"
+  )
+    fail(400, "Choose whether weekly late fees apply.");
+  return {
+    description,
+    due,
+    notes,
+    items,
+    discount,
+    discountLabel,
+    policy,
+    lateFeeEnabled:
+      body.late_fee_enabled ??
+      (current ? current.late_fee_policy === "weekly_2_percent" : true),
+  };
+}
+
 export function buildServer(options = {}) {
   const production =
     options.production ?? process.env.NODE_ENV === "production";
@@ -174,17 +235,19 @@ export function buildServer(options = {}) {
   const now = options.now ?? (() => new Date());
   const billingDay = () => billingDate(now());
   const lateFees = createLateFees(db, { notifications, now, demo });
+  const invoiceChanges = createInvoiceChanges(db, { notifications, now });
   const dummyHash = hashPassword(randomBytes(24).toString("hex"));
   const cookieName = production ? "__Host-ledger_session" : "ledger_session";
   const cookie = (token, age) =>
     `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${age}${production ? "; Secure" : ""}`;
-  const invoiceFor = (id, user) => {
+  const invoiceFor = (id, user, { allowDeleted = false } = {}) => {
     const row = db
       .prepare(
         `${invoiceQuery} WHERE i.id=?${user.role === "customer" ? " AND i.customer_id=?" : ""}`,
       )
       .get(...(user.role === "customer" ? [id, user.id] : [id]));
-    if (!row) fail(404, "Invoice not found.");
+    if (!row || (row.deleted_at && !allowDeleted))
+      fail(404, "Invoice not found.");
     return presentInvoice(row, billingDay());
   };
   const sessionFor = (req) => {
@@ -420,7 +483,7 @@ export function buildServer(options = {}) {
         json({
           reports: db
             .prepare(
-              `${query} ${user.role === "admin" ? "" : "WHERE r.customer_id=?"} ORDER BY r.id DESC`,
+              `${query} ${user.role === "admin" ? "" : "WHERE r.customer_id=? AND i.deleted_at IS NULL"} ORDER BY r.id DESC`,
             )
             .all(...(user.role === "admin" ? [] : [user.id])),
         });
@@ -431,12 +494,22 @@ export function buildServer(options = {}) {
         return;
       }
       if (path === "/api/invoices" && req.method === "GET") {
+        const includeDeleted =
+          new URL(req.url, "http://localhost").searchParams.get(
+            "include_deleted",
+          ) === "true";
+        if (includeDeleted && user.role !== "admin")
+          fail(403, "Administrator access is required.");
         const rows =
           user.role === "admin"
-            ? db.prepare(`${invoiceQuery} ORDER BY i.id DESC`).all()
+            ? db
+                .prepare(
+                  `${invoiceQuery} ${includeDeleted ? "" : "WHERE i.deleted_at IS NULL"} ORDER BY i.id DESC`,
+                )
+                .all()
             : db
                 .prepare(
-                  `${invoiceQuery} WHERE i.customer_id=? ORDER BY i.id DESC`,
+                  `${invoiceQuery} WHERE i.customer_id=? AND i.deleted_at IS NULL ORDER BY i.id DESC`,
                 )
                 .all(user.id);
         json({
@@ -446,9 +519,16 @@ export function buildServer(options = {}) {
       }
       let match = path.match(/^\/api\/invoices\/(\d+)$/);
       if (match && req.method === "GET") {
-        const invoice = invoiceFor(Number(match[1]), user);
+        const invoice = invoiceFor(Number(match[1]), user, {
+          allowDeleted: user.role === "admin",
+        });
         json({
           invoice,
+          changes: db
+            .prepare(
+              `SELECT id,revision,action,reason,created_at${user.role === "admin" ? ",changed_by,before_snapshot,after_snapshot" : ""} FROM invoice_changes WHERE invoice_id=? ORDER BY id DESC`,
+            )
+            .all(invoice.id),
           late_fees: db
             .prepare(
               "SELECT * FROM late_fees WHERE invoice_id=? ORDER BY assessed_date,id",
@@ -483,13 +563,17 @@ export function buildServer(options = {}) {
           plans:
             user.role === "admin"
               ? db
-                  .prepare(`${query} ORDER BY p.id DESC`)
+                  .prepare(
+                    `${query} WHERE i.deleted_at IS NULL ORDER BY p.id DESC`,
+                  )
                   .all()
                   .map((plan) =>
                     presentPlan(db, plan, invoiceFor(plan.invoice_id, user)),
                   )
               : db
-                  .prepare(`${query} WHERE p.customer_id=? ORDER BY p.id DESC`)
+                  .prepare(
+                    `${query} WHERE p.customer_id=? AND i.deleted_at IS NULL ORDER BY p.id DESC`,
+                  )
                   .all(user.id)
                   .map((plan) =>
                     presentPlan(db, plan, invoiceFor(plan.invoice_id, user)),
@@ -524,7 +608,7 @@ export function buildServer(options = {}) {
         if (
           db
             .prepare(
-              "SELECT id FROM plan_requests WHERE invoice_id=? AND status IN ('pending','approved')",
+              "SELECT id FROM plan_requests WHERE invoice_id=? AND status IN ('pending','approved') AND invalidated_at IS NULL",
             )
             .get(invoice.id)
         )
@@ -616,7 +700,7 @@ export function buildServer(options = {}) {
           fail(400, "Payment cannot exceed the remaining balance.");
         const approved = db
           .prepare(
-            "SELECT id FROM plan_requests WHERE invoice_id=? AND status='approved'",
+            "SELECT id FROM plan_requests WHERE invoice_id=? AND status='approved' AND invalidated_at IS NULL",
           )
           .get(invoice.id);
         if (amount !== invoice.balance && !approved)
@@ -663,6 +747,40 @@ export function buildServer(options = {}) {
         return;
       }
       if (user.role !== "admin") fail(403, "Administrator access is required.");
+      match = path.match(/^\/api\/invoices\/(\d+)\/(amend|delete)$/);
+      if (match && req.method === "POST") {
+        const body = await readBody(req),
+          invoice = invoiceFor(Number(match[1]), user);
+        if (!Number.isSafeInteger(body.revision) || body.revision < 1)
+          fail(400, "Reopen the invoice before making changes.");
+        const reason = text(body.reason, "Reason", 2000);
+        if (match[2] === "delete") {
+          if (body.confirm_number !== invoice.number)
+            fail(400, "Enter the invoice number exactly to confirm deletion.");
+          json(
+            invoiceChanges.remove(invoice.id, body.revision, reason, user.id),
+          );
+        } else {
+          if (
+            body.customer_id !== undefined &&
+            body.customer_id !== invoice.customer_id
+          )
+            fail(
+              400,
+              "The customer cannot be changed. Delete this invoice and create one for the correct customer.",
+            );
+          json(
+            invoiceChanges.amend(
+              invoice.id,
+              body.revision,
+              invoiceFields(body, invoice),
+              reason,
+              user.id,
+            ),
+          );
+        }
+        return;
+      }
       if (path === "/api/email-status" && req.method === "GET") {
         json(notifications.status());
         return;
@@ -847,51 +965,16 @@ export function buildServer(options = {}) {
             .get(body.customer_id)
         )
           fail(400, "Choose a customer.");
-        const description = text(body.description, "Invoice title", 160),
-          due = date(body.due_date, "due date"),
-          notes = text(body.notes, "Notes", 2000, true);
-        if (
-          !Array.isArray(body.items) ||
-          body.items.length < 1 ||
-          body.items.length > 50
-        )
-          fail(400, "Add between 1 and 50 line items.");
-        const items = body.items.map((item) => {
-          if (!item || typeof item !== "object")
-            fail(400, "Invalid line item.");
-          const description = text(item.description, "Charge description", 200),
-            unit = cents(item.unit_amount, "Unit price");
-          if (
-            !Number.isSafeInteger(item.quantity) ||
-            item.quantity < 1 ||
-            item.quantity > 10000
-          )
-            fail(400, "Quantity must be a whole number between 1 and 10,000.");
-          return { description, unit, quantity: item.quantity };
-        });
-        const subtotal = items.reduce(
-          (sum, item) => sum + item.unit * item.quantity,
-          0,
-        );
-        if (subtotal > MAX_CENTS)
-          fail(400, "Invoice total cannot exceed $1,000,000.");
-        const discount = optionalCents(body.discount_amount, "Discount");
-        if (discount > subtotal)
-          fail(400, "The discount cannot exceed the charges subtotal.");
-        const discountLabel = text(
-          body.discount_label,
-          "Discount label",
-          200,
-          true,
-        );
-        const policy = body.payment_policy ?? "eligible";
-        if (!["full", "eligible"].includes(policy))
-          fail(400, "Choose pay in full or eligible payment plans.");
-        if (
-          body.late_fee_enabled !== undefined &&
-          typeof body.late_fee_enabled !== "boolean"
-        )
-          fail(400, "Choose whether weekly late fees apply.");
+        const {
+          description,
+          due,
+          notes,
+          items,
+          discount,
+          discountLabel,
+          policy,
+          lateFeeEnabled,
+        } = invoiceFields(body);
         const id = transaction(db, () => {
           const today = billingDay();
           const id = Number(
@@ -908,7 +991,7 @@ export function buildServer(options = {}) {
                 discount,
                 discountLabel,
                 policy,
-                body.late_fee_enabled === false ? "none" : "weekly_2_percent",
+                lateFeeEnabled ? "weekly_2_percent" : "none",
                 today,
               ).lastInsertRowid,
           );
@@ -1003,6 +1086,11 @@ export function buildServer(options = {}) {
             .prepare("SELECT * FROM plan_requests WHERE id=?")
             .get(Number(match[1]));
         if (!plan) fail(404, "Request not found.");
+        if (plan.invalidated_at)
+          fail(
+            409,
+            "This plan was closed because the invoice was amended or deleted.",
+          );
         if (plan.status !== "pending")
           fail(409, "This request has already been reviewed.");
         if (!["approved", "declined"].includes(body.status))

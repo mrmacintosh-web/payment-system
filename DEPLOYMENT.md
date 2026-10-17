@@ -91,6 +91,8 @@ The following events generate emails when delivery is configured:
 | ------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------- |
 | Customer account created                    | Account ready, login address, password shared separately                                      | -                                           |
 | Invoice created                             | Invoice ready, discounted amount due, due date                                                | -                                           |
+| Invoice amended                             | Reason, old/new totals, amount due, due date, updated invoice link                            | -                                           |
+| Invoice deleted                             | Removal notice and reason; receipts stay available                                            | -                                           |
 | Plan requested                              | Request received, pending review, quoted terms                                                | Request details and customer's note         |
 | Plan approved                               | Approved terms, one-time fee, exact schedule, administrator's note                            | -                                           |
 | Plan declined                               | Decision, administrator's note, current balance, next steps                                   | -                                           |
@@ -104,7 +106,7 @@ The following events generate emails when delivery is configured:
 
 `ADMIN_EMAIL` overrides the recipient for all administrator billing notices. If unset, each administrator account receives them. Password security notices always go to the affected account owner. Approval and rejection actions show immediate confirmation in the administrator dashboard; they do not send an extra copy back to the reviewing administrator. Emails never include passwords or password-reset tokens. Temporary passwords must still be shared securely and separately. Command-line administrator password creation/recovery does not send email. Self-service password-reset links and automatic due/overdue reminders are not implemented.
 
-Email failures do not undo payments or dashboard receipts. Messages are stored in SQLite alongside their billing actions and retried with backoff and stable idempotency keys. After 12 failed attempts they remain pending for operator investigation. Fix provider settings before an operator resets affected pending rows' `attempts` and `next_attempt` to zero; do not reset sent rows. Only events occurring while delivery is configured are queued. Enabling email does not send historical notifications. Demo mode never queues or sends mail.
+Email failures do not undo payments or dashboard receipts. Messages are stored in SQLite alongside their billing actions and retried with backoff and stable idempotency keys. After 12 failed attempts they remain pending for operator investigation. Fix provider settings before an operator resets affected pending rows' `attempts` and `next_attempt` to zero; do not reset sent rows. Superseded/cancelled notices have `cancelled_at` set and are excluded from delivery and the portal's queued count. Only events occurring while delivery is configured are queued. Enabling email does not send historical notifications. Demo mode never queues or sends mail.
 
 ## 5. Verify and back up
 

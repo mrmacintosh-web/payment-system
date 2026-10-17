@@ -1612,6 +1612,18 @@ dialog::backdrop {
 .invoice-dialog-footer .button {
   font-size: 13px;
 }
+
+.invoice-dialog-footer {
+  flex-wrap: wrap;
+}
+.invoice-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.danger-button {
+  color: var(--danger);
+}
 .paid-message {
   display: flex;
   align-items: center;
@@ -3314,4 +3326,9 @@ input::file-selector-button {
   @page {
     margin: 18mm;
   }
+}
+
+html[data-display] .button.danger-button {
+  color: var(--danger);
+  border-color: var(--danger);
 }
